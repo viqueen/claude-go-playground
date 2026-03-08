@@ -121,8 +121,8 @@ WORKDIR /build
 # buf generate
 COPY buf.gen.yaml ./
 COPY protos/ protos/
-RUN buf dep update protos
-RUN buf generate protos
+RUN buf dep update protos/
+RUN buf generate protos/
 
 # sqlc generate
 COPY sqlc.yaml ./

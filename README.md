@@ -43,7 +43,8 @@ Each produces a focused, auditable PR:
 | Agent | `claude --agent <name>` | PR audit question |
 |-------|------------------------|-------------------|
 | **scaffold** | `claude --agent scaffold` | Does the structure match our architecture? |
-| **proto** | `claude --agent proto` | Is the data model and API contract right? |
+| **proto** | `claude --agent proto` | Is the API contract right? |
+| **entity-store** | `claude --agent entity-store` | Is the data model right? |
 | **domain** | `claude --agent domain` | Is the logic correct? |
 | **integrate** | `claude --agent integrate` | Is this wired correctly? |
 | **test** | `claude --agent test` | Is this adequately tested? |
@@ -55,7 +56,8 @@ Subagents invoked during PR review sessions to audit changes:
 | Agent | Reviews PRs from | Audit output |
 |-------|-----------------|--------------|
 | **review-scaffold** | scaffold | Structure & conventions checklist |
-| **review-proto** | proto | Contract & data model consistency |
+| **review-proto** | proto | API contract & validation annotations |
+| **review-entity-store** | entity-store | Schema, queries, proto ↔ SQL consistency |
 | **review-domain** | domain | Logic, layer rules, transaction patterns |
 | **review-integrate** | integrate | Wiring, route coverage, outbox events |
 | **review-test** | test | Coverage matrix, testcontainers usage |
@@ -65,10 +67,13 @@ Subagents invoked during PR review sessions to audit changes:
 ```mermaid
 graph LR
     scaffold --> proto
-    proto --> domain
+    scaffold --> entity-store
+    proto --> integrate
+    entity-store --> domain
     domain --> integrate
     integrate --> test
     test -.->|next domain| proto
+    test -.->|next domain| entity-store
 ```
 
 ## Getting Started

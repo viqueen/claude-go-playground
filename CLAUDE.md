@@ -95,7 +95,8 @@ Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
 | Agent | Purpose | PR character |
 |-------|---------|--------------|
 | `scaffold` | Project skeleton with empty stubs | "Does the structure match our architecture?" |
-| `proto` | Proto + migration + sqlc queries for a domain | "Is the data model and API contract right?" |
+| `proto` | Proto definition for a domain | "Is the API contract right?" |
+| `entity-store` | SQL migration + sqlc queries for a domain | "Is the data model right?" |
 | `domain` | Business logic for a domain | "Is the logic correct?" |
 | `integrate` | API handler + outbox + wiring for a domain | "Is this wired correctly?" |
 | `test` | Unit + integration tests for a domain | "Is this adequately tested?" |
@@ -105,7 +106,8 @@ Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
 | Agent | Reviews PRs from | Audit question |
 |-------|-----------------|----------------|
 | `review-scaffold` | `scaffold` | Does the structure match our architecture? |
-| `review-proto` | `proto` | Is the data model and API contract right? |
+| `review-proto` | `proto` | Is the API contract right? |
+| `review-entity-store` | `entity-store` | Is the data model right? |
 | `review-domain` | `domain` | Is the logic correct? |
 | `review-integrate` | `integrate` | Is this wired correctly? |
 | `review-test` | `test` | Is this adequately tested? |

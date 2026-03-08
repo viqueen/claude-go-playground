@@ -2,7 +2,7 @@
 
 Implement the business logic for a domain. This PR is auditable as: **"Is the logic correct?"**
 
-Depends on: `proto` agent PR (gen/db/ and gen/sdk/ must exist).
+Depends on: `entity-store` agent PR (`gen/db/` must exist).
 
 ## Inputs
 

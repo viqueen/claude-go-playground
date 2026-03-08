@@ -1,7 +1,7 @@
 # Proto Agent
 
-Add the API contract and data model for a domain. No Go business logic — just the proto definition,
-SQL migration, and sqlc queries. This PR is auditable as: **"Is the data model and API contract right?"**
+Add the API contract for a domain. No Go business logic, no SQL — just the proto definition.
+This PR is auditable as: **"Is the API contract right?"**
 
 ## Inputs
 
@@ -12,78 +12,161 @@ The user will specify:
 
 ## What to generate
 
-### 1. Proto Definition — `protos/<domain>/v1/<domain>.proto`
+### 1. Proto Files — `protos/<domain>/v1/`
+
+Split into three files per domain:
+
+#### `protos/<domain>/v1/<domain>_model.proto` — Resource + Enums
 
 ```protobuf
 syntax = "proto3";
+
+package <domain>.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "<domain>/v1;<domain>v1";
+
+enum <Resource>Status {
+  <RESOURCE>_STATUS_UNSPECIFIED = 0;
+  <RESOURCE>_STATUS_DRAFT = 1;
+  <RESOURCE>_STATUS_PUBLISHED = 2;
+  <RESOURCE>_STATUS_ARCHIVED = 3;
+}
+
+message <Resource> {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  <Resource>Status status = 4;
+  repeated string tags = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+```
+
+Conventions:
+- Enum zero value is always `_UNSPECIFIED = 0`
+- Use `google.protobuf.Timestamp` for time fields (not strings)
+- Resource message holds the full representation returned in responses
+- `go_package` uses the alias format: `<domain>/v1;<domain>v1`
+
+#### `protos/<domain>/v1/<domain>_refs.proto` — Typed ID References
+
+```protobuf
+syntax = "proto3";
+
 package <domain>.v1;
 
 import "buf/validate/validate.proto";
 
-// Resource message
-// Create/Get/List/Update/Delete request/response messages
-// Service definition with RPCs
+option go_package = "<domain>/v1;<domain>v1";
+
+message <Resource>Ref {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
 ```
 
-- Use `buf/validate/validate.proto` for field validation (e.g., `[(buf.validate.field).required = true]`)
-- Follow standard CRUD naming: `Create<Resource>`, `Get<Resource>`, `List<Resource>`, `Update<Resource>`, `Delete<Resource>`
-- List RPCs should support `page_size` + `page_token` pagination
-- Include `buf.yaml` in the proto directory if not already present
+Conventions:
+- Refs are for **cross-package** use — when another package needs to reference this entity
+- Within the same package, request messages use plain `string id` fields directly
+- Ref messages enforce UUID validation at the proto level
 
-### 2. SQL Migration — `sql/migrations/<NNN>_create_<domain>.sql`
+#### `protos/<domain>/v1/<domain>_service.proto` — Service + Request/Response
 
-```sql
--- +goose Up
-CREATE TABLE <domain> ( ... );
+```protobuf
+syntax = "proto3";
 
--- +goose Down
-DROP TABLE IF EXISTS <domain>;
+package <domain>.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/field_mask.proto";
+import "<domain>/v1/<domain>_model.proto";
+
+option go_package = "<domain>/v1;<domain>v1";
+
+service <Resource>Service {
+  rpc Create<Resource>(Create<Resource>Request) returns (Create<Resource>Response);
+  rpc Get<Resource>(Get<Resource>Request) returns (Get<Resource>Response);
+  rpc List<Resource>(List<Resource>Request) returns (List<Resource>Response);
+  rpc Update<Resource>(Update<Resource>Request) returns (Update<Resource>Response);
+  rpc Delete<Resource>(Delete<Resource>Request) returns (Delete<Resource>Response);
+}
+
+// Create
+
+message Create<Resource>Request {
+  string title = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string body = 2 [(buf.validate.field).string.min_len = 1];
+  <Resource>Status status = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  repeated string tags = 4;
+}
+
+message Create<Resource>Response {
+  <Resource> <resource> = 1;
+}
+
+// Get
+
+message Get<Resource>Request {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message Get<Resource>Response {
+  <Resource> <resource> = 1;
+}
+
+// List
+
+message List<Resource>Request {
+  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  string page_token = 2;
+}
+
+message List<Resource>Response {
+  repeated <Resource> items = 1;
+  string next_page_token = 2;
+}
+
+// Update
+
+message Update<Resource>Request {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  <Resource> <resource> = 2 [(buf.validate.field).required = true];
+  google.protobuf.FieldMask update_mask = 3 [(buf.validate.field).required = true];
+}
+
+message Update<Resource>Response {
+  <Resource> <resource> = 1;
+}
+
+// Delete
+
+message Delete<Resource>Request {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message Delete<Resource>Response {
+  bool success = 1;
+}
 ```
 
-- Use `UUID PRIMARY KEY DEFAULT gen_random_uuid()` for IDs
-- Include `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` and `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
-- Number the migration sequentially after existing ones
+Conventions:
+- CRUD naming: `Create<Resource>`, `Get<Resource>`, `List<Resource>`, `Update<Resource>`, `Delete<Resource>`
+- Every RPC has a `<RpcName>Request` and `<RpcName>Response` message pair
+- Response messages that return an entity wrap it in a named field (e.g., `Create<Resource>Response { <Resource> <resource> = 1; }`)
+- Within the same package, requests use plain `string id` fields (not Ref types)
+- List response items field is always named `items` for consistency across all entities
+- IDs validated as UUID: `[(buf.validate.field).string.uuid = true]`
+- Strings validated with length bounds: `{min_len: 1, max_len: 255}`
+- Enums validated to exclude unspecified: `{defined_only: true, not_in: [0]}`
+- Pagination: `page_size` with range validation `{gte: 1, lte: 100}` + `page_token`
+- Update uses `google.protobuf.FieldMask` to specify which fields to update
+- Update `<resource>` and `update_mask` are both required
 
-### 3. sqlc Queries — `sql/queries/<domain>/<domain>.sql`
+### 2. buf.yaml — `protos/buf.yaml`
 
-```sql
--- name: Get<Resource> :one
--- name: List<Resource> :many
--- name: Count<Resource> :one
--- name: Create<Resource> :one
--- name: Update<Resource> :one  (using sqlc.narg for nullable fields)
--- name: Delete<Resource> :execrows
-```
-
-- Use `sqlc.arg('name')` for required params
-- Use `sqlc.narg('name')` with `COALESCE` for optional update fields
-- Update queries must include `updated_at = now()`
-
-### 4. sqlc.yaml Update
-
-Add a new entry to the `sql:` list in `sqlc.yaml`:
-
-```yaml
-- engine: "postgresql"
-  queries: "sql/queries/<domain>/"
-  schema: "sql/migrations/"
-  gen:
-    go:
-      package: "<domain>"
-      out: "gen/db/<domain>"
-      sql_package: "pgx/v5"
-      overrides:
-        - db_type: "uuid"
-          go_type:
-            import: "github.com/gofrs/uuid/v5"
-            type: "UUID"
-        - db_type: "timestamptz"
-          go_type:
-            import: "time"
-            type: "Time"
-```
-
-### 5. buf.yaml (if not present) — `protos/<domain>/v1/buf.yaml`
+Lives at the protobuf root (not per-domain). Create only if it doesn't already exist.
 
 ```yaml
 version: v2
@@ -93,14 +176,24 @@ deps:
 
 ## Post-Generation
 
-1. Run `make codegen` to generate Go code from proto + sqlc
+1. Run `make codegen` to generate Go code from proto
 2. Run `make vet` — should pass (no new Go source files reference gen/ yet)
 
 ## Checklist
 
-- [ ] Proto file with all RPCs, proper validation annotations
-- [ ] Migration with correct schema, goose annotations, sequential numbering
-- [ ] sqlc queries cover all CRUD operations
-- [ ] sqlc.yaml updated with new domain entry
-- [ ] buf.yaml present with protovalidate dependency
+- [ ] Three proto files: `_model.proto`, `_refs.proto`, `_service.proto`
+- [ ] Proto package matches directory: `<domain>.v1` under `protos/<domain>/v1/`
+- [ ] `go_package` uses alias format: `<domain>/v1;<domain>v1`
+- [ ] Enums have `_UNSPECIFIED = 0` zero value
+- [ ] Time fields use `google.protobuf.Timestamp`
+- [ ] Update RPC uses `google.protobuf.FieldMask`
+- [ ] All ID fields validated as UUID: `[(buf.validate.field).string.uuid = true]`
+- [ ] String fields have length validation
+- [ ] Enum fields exclude unspecified: `{defined_only: true, not_in: [0]}`
+- [ ] Pagination: `page_size` with `{gte: 1, lte: 100}` + `page_token` / `next_page_token`
+- [ ] Ref message defined for cross-package ID references (within same package, use plain `string id`)
+- [ ] List response items field named `items`
+- [ ] Response messages wrap entity in a named field
+- [ ] `protos/buf.yaml` present at protobuf root with protovalidate dependency
+- [ ] No SQL files in this PR (entity-store agent handles that)
 - [ ] `make codegen` succeeds
