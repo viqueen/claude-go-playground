@@ -71,7 +71,9 @@ protos/<domain>/v1/         # .proto files
 
 ## Conventions
 
-- All tasks run via `make <target>` — never run go/buf/docker commands directly
+- All tasks run via `make <target>` from the project root — never run go/buf/docker commands directly
+- `make infra` starts infrastructure (docker compose), `make start` starts the server locally via air, `make debug` starts with delve
+- `make codegen` uses `docker build --target generate` to run buf + sqlc in a container
 - **Interface-first**: every package exposes an interface as its public API. Structs are unexported. Constructors return the interface type.
 - **Dependencies struct**: each layer defines an exported `Dependencies` struct. Constructors take it as the single parameter. The private struct inlines the fields directly.
 - **File prefixes**: `route_<rpc>.go` in api, `op_<operation>.go` in domain, `event_<concern>.go` in outbox.

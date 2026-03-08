@@ -23,14 +23,19 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 
 ### Build & Config
 
-- [ ] `.gitignore` covers `gen/`, `.env`, binaries
+- [ ] `.gitignore` covers `gen/`, `.env`, `tmp/`
 - [ ] `go.mod` exists with a valid module path
-- [ ] `Makefile` has targets: `codegen`, `tidy`, `vet`, `build`, `test`, `start`, `stop`, `clean`
-- [ ] `Makefile` target dependencies are correct: `tidy` depends on `codegen`, `vet` depends on `tidy`, `build` depends on `vet`, `test` depends on `vet`
+- [ ] `Makefile` has targets: `codegen`, `tidy`, `vet`, `build`, `test`, `infra`, `start`, `debug`, `teardown`, `clean`
+- [ ] `Makefile` target dependencies: `tidy` → `codegen`, `vet` → `tidy`, `build` → `vet`, `test` → `vet`, `start` → `infra`, `debug` → `infra`
+- [ ] `Makefile` `codegen` uses `docker build --target generate` (not docker compose)
+- [ ] `Makefile` `start` runs `go tool air`, `debug` runs `go tool air -c .air.debug.toml`
+- [ ] `go.mod` has `tool` directives for `github.com/air-verse/air` and `github.com/go-delve/delve/cmd/dlv`
 - [ ] `Dockerfile` is multi-stage: generate (buf + sqlc) → build → runtime
 - [ ] `Dockerfile` generate stage copies from `protos/` (not `api/`)
-- [ ] `docker-compose.yml` includes: postgres, opensearch, opensearch-dashboards, codegen (profile), api
-- [ ] `docker-compose.yml` postgres has a healthcheck and api depends on it with `condition: service_healthy`
+- [ ] `docker-compose.yml` has infra only: postgres, opensearch, opensearch-dashboards (no app services)
+- [ ] `docker-compose.yml` postgres has a healthcheck
+- [ ] `.air.toml` watches `go` and `sql` files, builds `cmd/server`, excludes `gen/` and `tmp/`
+- [ ] `.air.debug.toml` builds with `-gcflags='all=-N -l'`, runs via `dlv exec` on port 2345
 - [ ] `buf.gen.yaml` uses v2 config with managed mode
 - [ ] `buf.gen.yaml` `go_package_prefix` points to `<module>/gen/sdk`
 - [ ] `buf.gen.yaml` uses correct plugin for framework: `connectrpc/go` (Connect-RPC) or `go-grpc` (gRPC)

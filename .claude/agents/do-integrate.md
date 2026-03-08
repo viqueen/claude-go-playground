@@ -272,8 +272,8 @@ Update the setup files to register the new domain:
 
 1. Run `make vet` — fix all compilation errors
 2. Run `make build` — confirm Docker build works
-3. Run `make start` — confirm server boots with new handler registered
-4. Run `make stop`
+3. Run `make start` — starts infra + server via air, confirm `/health` returns 200
+4. Run `make teardown` — stops infra
 
 ## Checklist
 
