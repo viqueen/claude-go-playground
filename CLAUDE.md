@@ -39,7 +39,8 @@ pkg/
 ├── connectutil/interceptors.go
 ├── cache/cache.go
 ├── outbox/outbox.go
-└── migrate/migrate.go
+├── migrate/migrate.go
+└── testkit/containers.go
 gen/
 ├── sdk/                    # buf-generated (gitignored)
 └── db/<domain>/            # sqlc-generated (gitignored)
