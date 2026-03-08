@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -gcflags='all=-N -l' -o ./tmp/server ./cmd/server"
+bin = "tmp/server"
+full_bin = "go tool dlv exec ./tmp/server --listen=127.0.0.1:2345 --headless=true --api-version=2 --accept-multiclient --continue --"
+include_ext = ["go", "sql"]
+exclude_dir = [".git", "tmp", "vendor", "gen"]
+delay = 1000
+stop_on_error = true
+log = "tmp/air_errors.log"
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true
