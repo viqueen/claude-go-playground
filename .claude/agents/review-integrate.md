@@ -33,6 +33,14 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 - [ ] Imports connect-generated code from `gen/sdk/<domain>/v1/`
 - [ ] Handler implements the v1 connect service interface
 
+### Package & Import Conventions
+
+- [ ] Go package name is `api<domain><version>` (e.g., `apicontentv1`)
+- [ ] Import alias `<domain>v1` for proto types (e.g., `contentv1`)
+- [ ] Import alias `<domain>v1connect` for connect service (e.g., `contentv1connect`)
+- [ ] Import alias `db<domain>` for sqlc types (e.g., `dbcontent`)
+- [ ] Import alias `<domain>domain` for domain service (e.g., `contentdomain`)
+
 ### Handler Convention
 
 - [ ] `Dependencies` struct has a `Service` field typed to the domain `Service` interface
@@ -61,6 +69,7 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 ### Outbox — `internal/outbox/`
 
 - [ ] `river.go` exists with `NewRiverOutbox` constructor returning `outbox.Outbox[pgx.Tx]`
+- [ ] Import alias `<domain>events` for domain event workers (e.g., `contentevents`)
 - [ ] `mapEvent()` has cases for all event types emitted by the domain (created, updated, deleted)
 - [ ] Each event type fans out to the correct workers (index, audit, etc.)
 - [ ] No unhandled event types (default case returns an error)

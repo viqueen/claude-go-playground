@@ -15,28 +15,49 @@ The user will specify:
 
 ### 1. `internal/api/<domain>/v1/handler.go`
 
-Private struct implementing the Connect-generated service interface:
+Private struct implementing the Connect-generated service interface.
+
+The Go package name must be `api<domain><version>` (e.g., `apicontentv1` for `internal/api/content/v1/`).
+Import aliases must follow a consistent naming convention.
 
 ```go
-package <domain>
+package apicontentv1
 
+import (
+	"connectrpc.com/connect"
+
+	contentv1 "<module>/gen/sdk/content/v1"
+	contentv1connect "<module>/gen/sdk/content/v1/contentv1connect"
+	dbcontent "<module>/gen/db/content"
+	contentdomain "<module>/internal/domain/content"
+	"<module>/pkg/connectutil"
+)
+
+// Dependencies defines the dependencies for the content API handler.
 type Dependencies struct {
-    Service <domain>domain.Service
+	Service contentdomain.Service
 }
 
-func New(deps Dependencies) <domain>v1connect.<Resource>ServiceHandler {
-    return &handler{service: deps.Service}
+// New returns the Connect-generated handler interface. Struct is private.
+func New(deps Dependencies) contentv1connect.ContentServiceHandler {
+	return &handler{service: deps.Service}
 }
 
 type handler struct {
-    service <domain>domain.Service
+	service contentdomain.Service
 }
 
 var errorMappings = map[error]connect.Code{
-    <domain>domain.ErrNotFound:      connect.CodeNotFound,
-    <domain>domain.ErrAlreadyExists: connect.CodeAlreadyExists,
+	contentdomain.ErrNotFound:      connect.CodeNotFound,
+	contentdomain.ErrAlreadyExists: connect.CodeAlreadyExists,
 }
 ```
+
+Import alias conventions:
+- `<domain>v1` for proto types: `contentv1 "<module>/gen/sdk/content/v1"`
+- `<domain>v1connect` for connect service: `contentv1connect "<module>/gen/sdk/content/v1/contentv1connect"`
+- `db<domain>` for sqlc types: `dbcontent "<module>/gen/db/content"`
+- `<domain>domain` for domain service: `contentdomain "<module>/internal/domain/content"`
 
 ### 2. `internal/api/<domain>/v1/mapper.go`
 
@@ -72,6 +93,69 @@ func (h *handler) Create<Resource>(
 If this is the first domain, create `internal/outbox/river.go` with the `NewRiverOutbox` constructor
 and `mapEvent` switch. If it already exists, add cases for the new domain's event types.
 
+```go
+package outbox
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
+
+	contentevents "<module>/internal/outbox/content"
+	"<module>/pkg/outbox"
+)
+
+func NewRiverOutbox(client *river.Client[pgx.Tx]) outbox.Outbox[pgx.Tx] {
+	return &riverOutbox{client: client}
+}
+
+type riverOutbox struct {
+	client *river.Client[pgx.Tx]
+}
+
+func (o *riverOutbox) Emit(ctx context.Context, tx pgx.Tx, events ...outbox.Event) error {
+	for _, event := range events {
+		jobs, err := o.mapEvent(event)
+		if err != nil {
+			return err
+		}
+		for _, args := range jobs {
+			if _, err := o.client.InsertTx(ctx, tx, args, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// mapEvent fans out a domain event into one or more river jobs.
+func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
+	switch event.Type {
+	case "content.created":
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
+		}, nil
+	case "content.updated":
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+		}, nil
+	case "content.deleted":
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown event type: %s", event.Type)
+	}
+}
+```
+
+Import alias convention for outbox event packages:
+- `<domain>events` for domain event workers: `contentevents "<module>/internal/outbox/content"`
+
 ### 5. `internal/outbox/<domain>/event_<concern>.go` — One file per concern
 
 Each file contains river `JobArgs` + `Worker` for a specific concern:
@@ -90,7 +174,9 @@ Update the setup files to register the new domain:
 
 ## Conventions
 
+- **Go package naming**: `api<domain><version>` (e.g., `apicontentv1` for `internal/api/content/v1/`)
 - **API versioning**: `internal/api/<domain>/v1/` mirrors the proto package `<domain>.v1`. When a v2 proto is introduced, handlers go under `internal/api/<domain>/v2/`.
+- **Import aliases**: `<domain>v1` (proto), `<domain>v1connect` (connect), `db<domain>` (sqlc), `<domain>domain` (domain service), `<domain>events` (outbox events)
 - **File prefixes**: `route_<rpc>.go` in api, `event_<concern>.go` in outbox
 - **Error mappings**: defined as package-level var in `handler.go`, used by all routes via `connectutil.NewErrorFrom`
 - **Mapper isolation**: all proto ↔ sqlc conversion lives in `mapper.go`, nowhere else
@@ -111,6 +197,8 @@ Update the setup files to register the new domain:
 
 ## Checklist
 
+- [ ] Go package name is `api<domain><version>` (e.g., `apicontentv1`)
+- [ ] Import aliases follow convention: `<domain>v1`, `<domain>v1connect`, `db<domain>`, `<domain>domain`, `<domain>events`
 - [ ] `handler.go` with Dependencies, constructor, error mappings
 - [ ] `mapper.go` with toProto + fromProtoCreate + fromProtoUpdate
 - [ ] One `route_*.go` per RPC method
