@@ -2,7 +2,7 @@
 
 Add unit and integration tests for a domain. This PR is auditable as: **"Is this adequately tested?"**
 
-Depends on: `integrate` agent PR (full domain must be wired).
+Depends on: `do-integrate` agent PR (full domain must be wired).
 
 ## Inputs
 

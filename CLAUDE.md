@@ -95,20 +95,20 @@ Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
 
 | Agent | Purpose | PR character |
 |-------|---------|--------------|
-| `scaffold` | Project skeleton with empty stubs | "Does the structure match our architecture?" |
-| `proto` | Proto definition for a domain | "Is the API contract right?" |
-| `entity-store` | SQL migration + sqlc queries for a domain | "Is the data model right?" |
-| `domain` | Business logic for a domain | "Is the logic correct?" |
-| `integrate` | API handler + outbox + wiring for a domain | "Is this wired correctly?" |
-| `test` | Unit + integration tests for a domain | "Is this adequately tested?" |
+| `do-scaffold` | Project skeleton with empty stubs | "Does the structure match our architecture?" |
+| `do-proto` | Proto definition for a domain | "Is the API contract right?" |
+| `do-entity-store` | SQL migration + sqlc queries for a domain | "Is the data model right?" |
+| `do-domain` | Business logic for a domain | "Is the logic correct?" |
+| `do-integrate` | API handler + outbox + wiring for a domain | "Is this wired correctly?" |
+| `do-test` | Unit + integration tests for a domain | "Is this adequately tested?" |
 
 ### Review Agents (subagents for PR review sessions)
 
 | Agent | Reviews PRs from | Audit question |
 |-------|-----------------|----------------|
-| `review-scaffold` | `scaffold` | Does the structure match our architecture? |
-| `review-proto` | `proto` | Is the API contract right? |
-| `review-entity-store` | `entity-store` | Is the data model right? |
-| `review-domain` | `domain` | Is the logic correct? |
-| `review-integrate` | `integrate` | Is this wired correctly? |
-| `review-test` | `test` | Is this adequately tested? |
+| `review-scaffold` | `do-scaffold` | Does the structure match our architecture? |
+| `review-proto` | `do-proto` | Is the API contract right? |
+| `review-entity-store` | `do-entity-store` | Is the data model right? |
+| `review-domain` | `do-domain` | Is the logic correct? |
+| `review-integrate` | `do-integrate` | Is this wired correctly? |
+| `review-test` | `do-test` | Is this adequately tested? |

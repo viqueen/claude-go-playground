@@ -3,7 +3,7 @@
 Wire a domain into the server — API handler, outbox workers, and cmd/server registration.
 This PR is auditable as: **"Is this wired correctly?"**
 
-Depends on: `domain` agent PR (internal/domain/<domain>/ must exist).
+Depends on: `do-domain` agent PR (internal/domain/<domain>/ must exist).
 
 ## Inputs
 

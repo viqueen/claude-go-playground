@@ -45,7 +45,7 @@ Replace `<module>` with the actual Go module name.
 
 ### sqlc.yaml
 
-Empty sql list — domains add entries later via the `proto` agent.
+Empty sql list — domains add entries later via the `do-proto` agent.
 
 ```yaml
 version: "2"
@@ -669,7 +669,7 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 
 ### cmd/server/setup_domains.go
 
-Empty for now — domains are added by the `integrate` agent.
+Empty for now — domains are added by the `do-integrate` agent.
 
 ```go
 package main
@@ -685,7 +685,7 @@ func setupDomains(_ *Connections) *Domains {
 ### cmd/server/setup_gateway.go
 
 Creates the app with interceptors. No handlers registered yet — domains add them
-via the `integrate` agent.
+via the `do-integrate` agent.
 
 ```go
 package main

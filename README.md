@@ -42,12 +42,12 @@ Each produces a focused, auditable PR:
 
 | Agent | `claude --agent <name>` | PR audit question |
 |-------|------------------------|-------------------|
-| **scaffold** | `claude --agent scaffold` | Does the structure match our architecture? |
-| **proto** | `claude --agent proto` | Is the API contract right? |
-| **entity-store** | `claude --agent entity-store` | Is the data model right? |
-| **domain** | `claude --agent domain` | Is the logic correct? |
-| **integrate** | `claude --agent integrate` | Is this wired correctly? |
-| **test** | `claude --agent test` | Is this adequately tested? |
+| **do-scaffold** | `claude --agent do-scaffold` | Does the structure match our architecture? |
+| **do-proto** | `claude --agent do-proto` | Is the API contract right? |
+| **do-entity-store** | `claude --agent do-entity-store` | Is the data model right? |
+| **do-domain** | `claude --agent do-domain` | Is the logic correct? |
+| **do-integrate** | `claude --agent do-integrate` | Is this wired correctly? |
+| **do-test** | `claude --agent do-test` | Is this adequately tested? |
 
 ### Review Agents
 
@@ -55,25 +55,25 @@ Subagents invoked during PR review sessions to audit changes:
 
 | Agent | Reviews PRs from | Audit output |
 |-------|-----------------|--------------|
-| **review-scaffold** | scaffold | Structure & conventions checklist |
-| **review-proto** | proto | API contract & validation annotations |
-| **review-entity-store** | entity-store | Schema, queries, proto ↔ SQL consistency |
-| **review-domain** | domain | Logic, layer rules, transaction patterns |
-| **review-integrate** | integrate | Wiring, route coverage, outbox events |
-| **review-test** | test | Coverage matrix, testcontainers usage |
+| **review-scaffold** | do-scaffold | Structure & conventions checklist |
+| **review-proto** | do-proto | API contract & validation annotations |
+| **review-entity-store** | do-entity-store | Schema, queries, proto ↔ SQL consistency |
+| **review-domain** | do-domain | Logic, layer rules, transaction patterns |
+| **review-integrate** | do-integrate | Wiring, route coverage, outbox events |
+| **review-test** | do-test | Coverage matrix, testcontainers usage |
 
 ### Workflow
 
 ```mermaid
 graph LR
-    scaffold --> proto
-    scaffold --> entity-store
-    proto --> integrate
-    entity-store --> domain
-    domain --> integrate
-    integrate --> test
-    test -.->|next domain| proto
-    test -.->|next domain| entity-store
+    do-scaffold --> do-proto
+    do-scaffold --> do-entity-store
+    do-proto --> do-integrate
+    do-entity-store --> do-domain
+    do-domain --> do-integrate
+    do-integrate --> do-test
+    do-test -.->|next domain| do-proto
+    do-test -.->|next domain| do-entity-store
 ```
 
 ## Getting Started
