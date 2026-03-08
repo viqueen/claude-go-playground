@@ -4,6 +4,11 @@ Add the database schema and queries for a domain's entity store. A domain may ha
 entities — each gets its own table but they share a single migration file, a single sqlc
 query directory, and a single generated Go package. This PR is auditable as: **"Is the data model right?"**
 
+## Project Root
+
+All file paths are relative to the chosen project: `connect-rpc-backend/` or `grpc-backend/`.
+The user will specify which project. All `make` commands must be run from the project root.
+
 ## Inputs
 
 The user will specify:

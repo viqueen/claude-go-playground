@@ -3,6 +3,21 @@
 Generate the full project skeleton with empty stubs. The PR should compile, boot, and do nothing.
 No business logic — just structure.
 
+## Inputs
+
+The user will specify:
+- The **project**: `connect-rpc-backend` (Connect-RPC) or `grpc-backend` (gRPC)
+
+If not specified, ask the user to choose before proceeding.
+
+## Project Root
+
+All file paths below are relative to the chosen project folder.
+All `make` commands must be run from the project root.
+
+- `connect-rpc-backend` → generates `pkg/connectapp`, `pkg/connectutil`, uses `connectrpc/go` buf plugin
+- `grpc-backend` → generates `pkg/grpcapp`, `pkg/grpcutil`, uses `go-grpc` buf plugin
+
 ## What to generate
 
 ### .gitignore
@@ -10,7 +25,7 @@ No business logic — just structure.
 ```gitignore
 gen/
 .env
-/server
+tmp/
 ```
 
 ### go.mod
@@ -18,9 +33,22 @@ gen/
 Module name based on the repository (e.g., `github.com/<org>/<repo>`).
 Run `go mod init <module>` then add dependencies with `go get`.
 
+Add tool dependencies for local development:
+
+```
+tool (
+    github.com/air-verse/air
+    github.com/go-delve/delve/cmd/dlv
+)
+```
+
+Run `go mod tidy` after adding tools so they resolve in `go.sum`.
+
 ### buf.gen.yaml
 
 Uses buf v2 config with managed mode to rewrite `go_package` imports to match the Go module path.
+
+#### If Connect-RPC
 
 ```yaml
 version: v2
@@ -37,6 +65,27 @@ plugins:
     out: gen/sdk
     opt: paths=source_relative
   - remote: buf.build/connectrpc/go
+    out: gen/sdk
+    opt: paths=source_relative
+```
+
+#### If gRPC
+
+```yaml
+version: v2
+managed:
+  enabled: true
+  disable:
+    - file_option: go_package
+      module: buf.build/bufbuild/protovalidate
+  override:
+    - file_option: go_package_prefix
+      value: <module>/gen/sdk
+plugins:
+  - protoc_builtin: go
+    out: gen/sdk
+    opt: paths=source_relative
+  - protoc_builtin: go-grpc
     out: gen/sdk
     opt: paths=source_relative
 ```
@@ -63,12 +112,13 @@ SERVER_ADDR=:8080
 ### Makefile
 
 ```makefile
-.PHONY: codegen tidy vet build test start stop clean
+.PHONY: codegen tidy vet build test infra start debug teardown clean
 
 # --- codegen ---
 
 codegen:
-	docker compose --profile codegen run --rm codegen
+	docker build --target generate -t codegen .
+	docker run --rm -v ./gen:/out/gen codegen cp -r /build/gen/. /out/gen/
 
 tidy: codegen
 	go mod tidy
@@ -79,32 +129,94 @@ vet: tidy
 	go vet ./...
 
 build: vet
-	docker compose build api
+	docker build .
 
 test: vet
 	go test ./...
 
+# --- infra ---
+
+infra:
+	docker compose up -d
+	@echo "waiting for postgres to be healthy..."
+	@until docker compose exec -T postgres pg_isready -U playground > /dev/null 2>&1; do sleep 1; done
+	@echo "infra is up"
+
 # --- run ---
 
-start:
-	docker compose up -d
-	@echo "waiting for api to be healthy..."
-	@until curl -sf http://localhost:8080/health > /dev/null 2>&1; do sleep 1; done
-	@echo "api is up"
+start: infra
+	go tool air
 
-stop:
+debug: infra
+	go tool air -c .air.debug.toml
+
+# --- teardown ---
+
+teardown:
 	docker compose down
 
-# --- cleanup ---
+clean: teardown
+	rm -rf gen/ tmp/
+```
 
-clean:
-	docker compose down -v
-	rm -rf gen/
+### .air.toml
+
+Live-reload configuration for development. Watches Go and SQL files, rebuilds `cmd/server`,
+restarts on changes.
+
+```toml
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/server ./cmd/server"
+bin = "tmp/server"
+include_ext = ["go", "sql"]
+exclude_dir = [".git", "tmp", "vendor", "gen"]
+delay = 1000
+stop_on_error = true
+log = "tmp/air_errors.log"
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true
+```
+
+### .air.debug.toml
+
+Debug-mode configuration. Builds with debug symbols enabled and compiler optimizations disabled,
+runs via delve on port 2345.
+
+```toml
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -gcflags='all=-N -l' -o ./tmp/server ./cmd/server"
+bin = "tmp/server"
+full_bin = "go tool dlv exec ./tmp/server --listen=127.0.0.1:2345 --headless=true --api-version=2 --accept-multiclient --continue --"
+include_ext = ["go", "sql"]
+exclude_dir = [".git", "tmp", "vendor", "gen"]
+delay = 1000
+stop_on_error = true
+log = "tmp/air_errors.log"
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true
 ```
 
 ### Dockerfile
 
 Multi-stage build: generate (buf + sqlc) → build → runtime.
+
+The generate stage installs the protoc plugin matching the project's framework.
+
+#### If Connect-RPC
 
 ```dockerfile
 # Stage 1: Generate proto + sqlc code
@@ -148,7 +260,53 @@ EXPOSE 8080
 CMD ["/server"]
 ```
 
+#### If gRPC
+
+```dockerfile
+# Stage 1: Generate proto + sqlc code
+FROM golang:1.24-alpine AS generate
+
+RUN apk add --no-cache git
+RUN go install github.com/bufbuild/buf/cmd/buf@latest
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+WORKDIR /build
+
+# buf generate
+COPY buf.gen.yaml ./
+COPY protos/ protos/
+RUN buf dep update protos/
+RUN buf generate protos/
+
+# sqlc generate
+COPY sqlc.yaml ./
+COPY sql ./sql
+RUN sqlc generate
+
+# Stage 2: Build
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+COPY . .
+COPY --from=generate /build/gen ./gen
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o /server ./cmd/server
+
+# Stage 3: Runtime
+FROM alpine:3.21
+
+RUN apk add --no-cache curl
+COPY --from=builder /server /server
+
+EXPOSE 8080
+CMD ["/server"]
+```
+
 ### docker-compose.yml
+
+Infrastructure only — no application services. The server runs locally via `air`.
 
 ```yaml
 services:
@@ -183,36 +341,6 @@ services:
       - "5601:5601"
     depends_on:
       - opensearch
-
-  codegen:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: generate
-    volumes:
-      - ./gen:/out/gen
-    entrypoint: ["cp", "-r", "/build/gen/.", "/out/gen/"]
-    profiles:
-      - codegen
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - DATABASE_URL=postgres://playground:playground@postgres:5432/playground?sslmode=disable
-      - OPENSEARCH_URL=http://opensearch:9200
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
 ```
 
 ---
@@ -259,10 +387,12 @@ func getEnv(key, fallback string) string {
 }
 ```
 
-### pkg/connectapp/app.go
+### pkg/connectapp/app.go (Connect-RPC only)
 
 Reusable Connect RPC application lifecycle. Single server with h2c, path-based routing,
 graceful shutdown. Health and API handlers served from different paths on the same port.
+
+Skip this package entirely if using gRPC — use `pkg/grpcapp` instead.
 
 ```go
 package connectapp
@@ -327,9 +457,105 @@ func (a *app) Run(ctx context.Context) error {
 }
 ```
 
-### pkg/connectutil/errors.go
+### pkg/grpcapp/app.go (gRPC only)
 
-Map domain sentinel errors to connect error codes.
+Reusable gRPC application lifecycle. Native gRPC server with graceful shutdown.
+Health served via gRPC health check protocol + an HTTP `/health` sidecar endpoint.
+
+Skip this package entirely if using Connect-RPC — use `pkg/connectapp` instead.
+
+```go
+package grpcapp
+
+import (
+	"context"
+	"net"
+	"net/http"
+
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
+)
+
+// App is the public interface for the gRPC application.
+type App interface {
+	Server() *grpc.Server
+	Run(ctx context.Context) error
+}
+
+type Option func(*app)
+
+func WithAddr(addr string) Option         { return func(a *app) { a.addr = addr } }
+func WithHealthAddr(addr string) Option   { return func(a *app) { a.healthAddr = addr } }
+func WithServerOpts(opts ...grpc.ServerOption) Option {
+	return func(a *app) { a.serverOpts = append(a.serverOpts, opts...) }
+}
+
+func New(opts ...Option) App {
+	a := &app{addr: ":8080", healthAddr: ":8081"}
+	for _, o := range opts {
+		o(a)
+	}
+	a.server = grpc.NewServer(a.serverOpts...)
+
+	// gRPC health check
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(a.server, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
+	// gRPC reflection
+	reflection.Register(a.server)
+
+	return a
+}
+
+type app struct {
+	addr       string
+	healthAddr string
+	serverOpts []grpc.ServerOption
+	server     *grpc.Server
+}
+
+func (a *app) Server() *grpc.Server {
+	return a.server
+}
+
+func (a *app) Run(ctx context.Context) error {
+	lis, err := net.Listen("tcp", a.addr)
+	if err != nil {
+		return err
+	}
+
+	// HTTP health sidecar for docker-compose/k8s probes
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"up"}`))
+	})
+	healthServer := &http.Server{Addr: a.healthAddr, Handler: healthMux}
+	go func() { _ = healthServer.ListenAndServe() }()
+
+	log.Info().Str("addr", a.addr).Str("health_addr", a.healthAddr).Msg("server started")
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.server.Serve(lis) }()
+
+	select {
+	case <-ctx.Done():
+		a.server.GracefulStop()
+		return healthServer.Close()
+	case err := <-errCh:
+		_ = healthServer.Close()
+		return err
+	}
+}
+```
+
+### pkg/connectutil/errors.go (Connect-RPC only)
+
+Map domain sentinel errors to connect error codes. Skip if using gRPC.
 
 ```go
 package connectutil
@@ -350,9 +576,9 @@ func NewErrorFrom(err error, mappings map[error]connect.Code) *connect.Error {
 }
 ```
 
-### pkg/connectutil/interceptors.go
+### pkg/connectutil/interceptors.go (Connect-RPC only)
 
-Shared interceptors: recovery, logging, buf validate.
+Shared interceptors: recovery, logging, buf validate. Skip if using gRPC.
 
 ```go
 package connectutil
@@ -404,6 +630,92 @@ func NewLoggingInterceptor() connect.UnaryInterceptorFunc {
 				Msg("rpc")
 			return resp, err
 		}
+	}
+}
+```
+
+### pkg/grpcutil/errors.go (gRPC only)
+
+Map domain sentinel errors to gRPC status codes. Skip if using Connect-RPC.
+
+```go
+package grpcutil
+
+import (
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+func NewErrorFrom(err error, mappings map[error]codes.Code) error {
+	for sentinel, code := range mappings {
+		if errors.Is(err, sentinel) {
+			return status.Error(code, err.Error())
+		}
+	}
+	return status.Error(codes.Internal, err.Error())
+}
+```
+
+### pkg/grpcutil/interceptors.go (gRPC only)
+
+Shared interceptors: recovery, logging, buf validate. Skip if using Connect-RPC.
+
+```go
+package grpcutil
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	protovalidate_middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
+)
+
+func NewServerOpts() []grpc.ServerOption {
+	validateInterceptor, err := protovalidate_middleware.NewUnaryServerInterceptor()
+	if err != nil {
+		panic(fmt.Sprintf("failed to create protovalidate interceptor: %v", err))
+	}
+	return []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(
+			RecoveryInterceptor(),
+			LoggingInterceptor(),
+			validateInterceptor,
+		),
+	}
+}
+
+func RecoveryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = status.Errorf(codes.Internal, "panic: %v", r)
+			}
+		}()
+		return handler(ctx, req)
+	}
+}
+
+func LoggingInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		evt := log.Info()
+		if err != nil {
+			evt = log.Error().Err(err)
+		}
+		evt.
+			Str("method", info.FullMethod).
+			Dur("duration", time.Since(start)).
+			Msg("rpc")
+		return resp, err
 	}
 }
 ```
@@ -687,6 +999,8 @@ func setupDomains(_ *Connections) *Domains {
 Creates the app with interceptors. No handlers registered yet — domains add them
 via the `do-integrate` agent.
 
+#### If Connect-RPC
+
 ```go
 package main
 
@@ -700,6 +1014,30 @@ func setupGateway(cfg *config.Config, _ *Domains) connectapp.App {
 
 	// Handlers are registered here by the integrate agent.
 	// Each domain adds its Connect handler with interceptors.
+
+	return application
+}
+```
+
+#### If gRPC
+
+```go
+package main
+
+import (
+	"<module>/pkg/config"
+	"<module>/pkg/grpcapp"
+	"<module>/pkg/grpcutil"
+)
+
+func setupGateway(cfg *config.Config, _ *Domains) grpcapp.App {
+	application := grpcapp.New(
+		grpcapp.WithAddr(cfg.ServerAddr),
+		grpcapp.WithServerOpts(grpcutil.NewServerOpts()...),
+	)
+
+	// Services are registered here by the integrate agent.
+	// Each domain registers its gRPC service on application.Server().
 
 	return application
 }
@@ -720,10 +1058,10 @@ Create placeholder `.gitkeep` files in:
 
 After writing all files, run through these steps in order. Fix any errors before proceeding.
 
-1. **`make vet`** — generates code (codegen), resolves dependencies (tidy), then runs `go vet ./...`. Fix all issues before continuing.
-2. **`make build`** — builds the Docker image end-to-end. Confirms the full build pipeline works.
-3. **`make start`** — starts all services and waits for health check. Confirms the server boots.
-4. **`make stop`** — tears down services.
+1. **`make vet`** — generates code (codegen via docker build), resolves dependencies (tidy), then runs `go vet ./...`. Fix all issues before continuing.
+2. **`make build`** — builds the full Docker image end-to-end. Confirms the build pipeline works.
+3. **`make start`** — starts infra (docker compose) then the server locally via air. Confirm health endpoint returns 200 (Connect-RPC: `http://localhost:8080/health`, gRPC: `http://localhost:8081/health`).
+4. **`make teardown`** — stops infra.
 
 If `make vet` fails, read the errors carefully — common issues:
 - Unused imports: remove them (only import packages directly referenced in the file)
@@ -732,17 +1070,22 @@ If `make vet` fails, read the errors carefully — common issues:
 
 ## Checklist
 
-- [ ] `.gitignore` covers `gen/`, `.env`, binaries
+- [ ] `.gitignore` covers `gen/`, `.env`, `tmp/`
 - [ ] `go.mod` with correct module path
-- [ ] `Makefile` with all targets
+- [ ] `Makefile` with targets: `codegen`, `tidy`, `vet`, `build`, `test`, `infra`, `start`, `debug`, `teardown`, `clean`
 - [ ] `Dockerfile` multi-stage build (generate → build → runtime)
-- [ ] `docker-compose.yml` with postgres, opensearch, codegen, api
+- [ ] `docker-compose.yml` with infra only: postgres, opensearch, opensearch-dashboards (no app services)
+- [ ] `.air.toml` — live-reload config for `cmd/server`
+- [ ] `.air.debug.toml` — debug config with delve on port 2345
 - [ ] `buf.gen.yaml` with managed mode and `go_package_prefix` pointing to `gen/sdk`
+- [ ] `buf.gen.yaml` uses correct plugin for chosen framework (`connectrpc/go` or `go-grpc`)
 - [ ] `sqlc.yaml` with empty sql list
 - [ ] `.env` with defaults
 - [ ] `pkg/config` — Config struct + Load()
-- [ ] `pkg/connectapp` — App interface + h2c server + /health
-- [ ] `pkg/connectutil` — NewErrorFrom + interceptors (recovery, logging, validate)
+- [ ] Connect-RPC: `pkg/connectapp` — App interface + h2c server + /health
+- [ ] Connect-RPC: `pkg/connectutil` — NewErrorFrom + interceptors (recovery, logging, validate)
+- [ ] gRPC: `pkg/grpcapp` — App interface + gRPC server + health check + reflection
+- [ ] gRPC: `pkg/grpcutil` — NewErrorFrom + interceptors (recovery, logging, validate)
 - [ ] `pkg/cache` — Cache[K,V] interface + in-memory implementation
 - [ ] `pkg/outbox` — Outbox[T] interface + Event struct
 - [ ] `pkg/migrate` — goose wrapper

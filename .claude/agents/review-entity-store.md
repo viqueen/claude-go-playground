@@ -9,6 +9,11 @@ Audit an entity-store PR. Answer the question: **"Is the data model right?"**
 
 A domain may contain multiple entities. Verify all entities in the domain are covered.
 
+## Project Root
+
+The PR targets one project: `connect-rpc-backend/` or `grpc-backend/`.
+Identify which project from the PR file paths.
+
 ## How to review
 
 1. Fetch the PR diff:

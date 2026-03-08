@@ -4,6 +4,11 @@ Implement the business logic for a domain. This PR is auditable as: **"Is the lo
 
 Depends on: `do-entity-store` agent PR (`gen/db/` must exist).
 
+## Project Root
+
+All file paths are relative to the chosen project: `connect-rpc-backend/` or `grpc-backend/`.
+The user will specify which project. All `make` commands must be run from the project root.
+
 ## Inputs
 
 The user will specify:

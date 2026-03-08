@@ -16,7 +16,10 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 
 2. Identify the domain being integrated and read the full files (not just the diff).
 
-3. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+3. Identify the project from the PR file paths: `connect-rpc-backend/` or `grpc-backend/`.
+
+4. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+   Items marked **(Connect-RPC)** or **(gRPC)** only apply to the corresponding project.
 
 ## Checklist
 
@@ -30,24 +33,28 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 ### API Versioning
 
 - [ ] Go package lives under `internal/api/<domain>/v1/`
-- [ ] Imports connect-generated code from `gen/sdk/<domain>/v1/`
-- [ ] Handler implements the v1 connect service interface
+- [ ] Imports generated code from `gen/sdk/<domain>/v1/`
+- [ ] **(Connect-RPC)** Handler implements the v1 connect service interface
+- [ ] **(gRPC)** Handler embeds `Unimplemented<Service>Server` and implements the v1 gRPC service interface
 
 ### Package & Import Conventions
 
 - [ ] Go package name is `api<domain><version>` (e.g., `apicontentv1`)
 - [ ] Import alias `<domain>v1` for proto types (e.g., `contentv1`)
-- [ ] Import alias `<domain>v1connect` for connect service (e.g., `contentv1connect`)
+- [ ] **(Connect-RPC)** Import alias `<domain>v1connect` for connect service (e.g., `contentv1connect`)
+- [ ] **(gRPC)** Import alias `<domain>v1grpc` for gRPC service (e.g., `contentv1grpc`)
 - [ ] Import alias `db<domain>` for sqlc types (e.g., `dbcontent`)
 - [ ] Import alias `<domain>domain` for domain service (e.g., `contentdomain`)
 
 ### Handler Convention
 
 - [ ] `Dependencies` struct has a `Service` field typed to the domain `Service` interface
-- [ ] `New()` returns the connect-generated handler interface (not a concrete struct)
+- [ ] **(Connect-RPC)** `New()` returns the connect-generated handler interface (not a concrete struct)
+- [ ] **(gRPC)** `New()` returns the gRPC-generated service server interface (not a concrete struct)
 - [ ] `handler` struct is unexported
 - [ ] `handler` struct has a `service` field (inlined, not embedded Dependencies)
-- [ ] `errorMappings` is a package-level var mapping domain errors → connect codes
+- [ ] **(Connect-RPC)** `errorMappings` maps domain errors → `connect.Code`
+- [ ] **(gRPC)** `errorMappings` maps domain errors → `codes.Code`
 
 ### Mapper
 
@@ -62,7 +69,8 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 
 - [ ] Each `route_*.go` contains exactly one handler method
 - [ ] Route methods call domain service (not sqlc directly)
-- [ ] Route methods use `connectutil.NewErrorFrom(err, errorMappings)` for error mapping
+- [ ] **(Connect-RPC)** Route methods use `connectutil.NewErrorFrom(err, errorMappings)` for error mapping
+- [ ] **(gRPC)** Route methods use `grpcutil.NewErrorFrom(err, errorMappings)` for error mapping
 - [ ] Route methods use mapper functions for proto ↔ sqlc conversion
 - [ ] Every RPC in the proto service has a corresponding route file
 
@@ -88,12 +96,13 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 - [ ] `setup_domains.go` — `Domains` struct has new field for this domain's `Service`
 - [ ] `setup_domains.go` — service wired with correct dependencies (pool, queries, cache, outbox)
 - [ ] `setup_gateway.go` — handler created via `New(Dependencies{...})`
-- [ ] `setup_gateway.go` — handler registered with `connect.WithInterceptors(interceptors...)`
-- [ ] `setup_gateway.go` — service name added to gRPC reflection
+- [ ] **(Connect-RPC)** `setup_gateway.go` — handler registered with `connect.WithInterceptors(interceptors...)`
+- [ ] **(Connect-RPC)** `setup_gateway.go` — handler path registered on connectapp mux
+- [ ] **(gRPC)** `setup_gateway.go` — service registered via `Register<Service>Server(application.Server(), handler)`
 
 ### Layer Rules — Imports
 
-- [ ] `internal/api/<domain>/v1/` imports: `internal/domain/<domain>`, `gen/sdk/`, `gen/db/`, `pkg/connectutil` — ALLOWED
+- [ ] `internal/api/<domain>/v1/` imports: `internal/domain/<domain>`, `gen/sdk/`, `gen/db/`, `pkg/connectutil` or `pkg/grpcutil` — ALLOWED
 - [ ] `internal/outbox/<domain>/` imports: `gen/db/`, `pkg/outbox`, river — ALLOWED
 - [ ] `internal/outbox/<domain>/` does NOT import `internal/domain/` or `internal/api/`
 - [ ] `internal/api/<domain>/v1/` does NOT import `internal/outbox/`

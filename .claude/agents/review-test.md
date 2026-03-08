@@ -16,7 +16,10 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 2. Identify the domain being tested and read the full files (not just the diff).
 
-3. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+3. Identify the project from the PR file paths: `connect-rpc-backend/` or `grpc-backend/`.
+
+4. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+   Items marked **(Connect-RPC)** or **(gRPC)** only apply to the corresponding project.
 
 ## Checklist
 
@@ -50,16 +53,30 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### API Tests — `internal/api/<domain>/v1/`
 
-- [ ] `handler_test.go` has `setupHandler(t)` returning a Connect client + context
-- [ ] Uses `httptest.NewServer` with the Connect handler
-- [ ] Uses the generated Connect client to make RPC calls
-- [ ] Uses testcontainers for the database backend (no mocks)
-- [ ] Each `route_*_test.go` has a single parent test function (e.g., `TestCreateContent`)
+- [ ] `handler_test.go` defines `accessLevel` enum: `anonymous`, `standard`, `admin`, `elevated`
+- [ ] `handler_test.go` defines `testClients[T]` struct with all four client fields
+- [ ] `handler_test.go` defines `panicService` for interceptor-only tests
+- [ ] `setupHandler(t)` — no database, uses panic service (interceptor-level errors)
+- [ ] `setupHandlerWithDB(t)` — testcontainers postgres, real service (domain errors + success)
+- [ ] `startServer(t, handler)` — shared helper creating server + clients (used by both setup functions)
+- [ ] Each client injects auth via interceptor (Connect-RPC: header, gRPC: metadata)
+- [ ] `anonymous` client sends no auth credentials
+- [ ] **(Connect-RPC)** Uses `httptest.NewServer` with per-level Connect clients
+- [ ] **(gRPC)** Uses `bufconn` with per-level gRPC clients
+- [ ] `setupHandlerWithDB` uses testcontainers for the database backend (no mocks)
+- [ ] Each `route_*_test.go` has two parent tests: `Test<Endpoint>_Errors` + `Test<Endpoint>_Success`
+- [ ] `_Errors` calls `setupHandler(t)` at parent level — interceptor errors only (no DB)
+- [ ] `_Success` calls `setupHandlerWithDB(t)` at parent level — domain errors + success cases (with DB)
+- [ ] Subtests within each parent call `t.Parallel()`
 - [ ] Tests cover all RPCs: create, get, list, update, delete
-- [ ] Tests verify correct Connect error codes on failures:
-  - [ ] Not found → `connect.CodeNotFound`
-  - [ ] Already exists → `connect.CodeAlreadyExists`
-  - [ ] Invalid argument → `connect.CodeInvalidArgument`
+- [ ] Every RPC tests unauthenticated path via `clients.anonymous` in `_Errors`
+- [ ] Admin-only RPCs test `clients.standard` → `PermissionDenied` in `_Errors`
+- [ ] Elevated RPCs test `clients.admin` → `PermissionDenied` in `_Errors`
+- [ ] Domain errors (not found, already exists) go in `_Success` (they need the DB)
+- [ ] Multiple success subtests cover different API contract scenarios
+- [ ] Tests verify correct error codes:
+  - [ ] **(Connect-RPC)** `connect.CodeUnauthenticated`, `connect.CodePermissionDenied`, `connect.CodeNotFound`, etc.
+  - [ ] **(gRPC)** `codes.Unauthenticated`, `codes.PermissionDenied`, `codes.NotFound`, etc. (via `status.Code(err)`)
 
 ### Outbox Worker Tests — `internal/outbox/<domain>/`
 
@@ -68,15 +85,16 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### Test Case Ordering
 
-- [ ] Error cases come **before** success cases in every parent test
-- [ ] API layer ordering: unauthenticated → invalid argument → permission denied → not found → already exists → success
+- [ ] API `_Errors`: unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin ops)
+- [ ] API `_Success`: not found → already exists → success cases (one or more)
 - [ ] Domain layer ordering: not found → already exists → precondition failed → success
 - [ ] Domain tests do NOT test invalid argument (that's the API/interceptor layer)
 
 ### Test Naming
 
-- [ ] Subtest names follow `<outcome> — <description>` pattern
-- [ ] Examples: `"not found — nonexistent ID"`, `"invalid argument — empty title"`, `"success"`
+- [ ] Parent test functions: `Test<Endpoint>_Errors` and `Test<Endpoint>_Success`
+- [ ] `_Errors` subtest names: `<error code> — <description>` (e.g., `"unauthenticated — no token"`)
+- [ ] `_Success` subtest names: descriptive of scenario (e.g., `"creates with optional tags"`, `"not found — nonexistent ID"`)
 - [ ] No numbered test names (e.g., `TestCreate1`)
 
 ### Assertions
@@ -90,9 +108,11 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 ### Anti-patterns
 
 - [ ] No table-driven tests (`[]struct{ name string; ... }`)
-- [ ] No mocks for databases — testcontainers only
+- [ ] No mocks for databases — testcontainers only (when DB is needed)
 - [ ] No `Test*` functions in setup files (`service_test.go`, `handler_test.go`)
 - [ ] No shared state between parent tests
+- [ ] No testcontainers in `_Errors` tests (interceptor-only, must use `setupHandler`)
+- [ ] No missing `t.Parallel()` in route subtests
 
 ## Output format
 
@@ -112,12 +132,12 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 | ... | ... | ... | ... |
 
 ### Coverage Matrix
-| Layer | Operation | Error Cases | Success Case | Ordering | Status |
-|-------|-----------|-------------|-------------|----------|--------|
-| Domain | Create | invalid arg | yes | errors first | PASS |
-| Domain | Get | not found | yes | errors first | PASS |
-| API | CreateContent | invalid arg | yes | errors first | PASS |
-| API | GetContent | not found | yes | errors first | PASS |
+| Layer | Operation | _Errors (no DB) | _Success (with DB) | t.Parallel | Status |
+|-------|-----------|----------------|-------------------|------------|--------|
+| Domain | Create | — | already exists, success | — | PASS |
+| Domain | Get | — | not found, success | — | PASS |
+| API | CreateContent | unauth, invalid arg | success (x2) | yes | PASS |
+| API | DeleteContent | unauth, perm denied | not found, success | yes | PASS |
 | ... | ... | ... | ... | ... | ... |
 
 ### Assertion Usage

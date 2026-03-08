@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-Connect-RPC backend in Go, following a layered architecture.
+RPC backend in Go (Connect-RPC or gRPC), following a layered architecture.
 See `_architecture/platform-backend.png` for the visual mental model.
 
 ## Tech Stack
 
 - **Language**: Go
-- **RPC Framework**: Connect-RPC (`connectrpc.com/connect`)
+- **RPC Framework**: Connect-RPC (`connectrpc.com/connect`) or gRPC (`google.golang.org/grpc`) — chosen per project at scaffold time
 - **Protobuf**: Buf CLI for proto management and code generation
 - **SQL**: sqlc for type-safe queries, goose for migrations
 - **Task Runner**: Make — all commands go through `Makefile`
@@ -18,7 +18,21 @@ See `_architecture/platform-backend.png` for the visual mental model.
 - **Logging**: zerolog
 - **Config**: godotenv
 
-## Directory Structure
+## Repo Layout
+
+This repo contains two independent Go projects, one per RPC framework:
+
+```
+connect-rpc-backend/        # Connect-RPC project
+grpc-backend/               # gRPC project
+```
+
+All agents write code into the chosen project root. The user specifies which project
+when invoking an agent. All `make` commands must be run from inside the project folder.
+
+## Project Directory Structure
+
+Each project (`connect-rpc-backend/` or `grpc-backend/`) follows this layout:
 
 ```
 cmd/server/
@@ -34,9 +48,12 @@ internal/
     └── <domain>/           # event_<concern>.go per domain
 pkg/
 ├── config/config.go
-├── connectapp/app.go
-├── connectutil/errors.go
-├── connectutil/interceptors.go
+├── connectapp/app.go        # Connect-RPC project only
+├── connectutil/errors.go    # Connect-RPC project only
+├── connectutil/interceptors.go  # Connect-RPC project only
+├── grpcapp/app.go           # gRPC project only
+├── grpcutil/errors.go       # gRPC project only
+├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
 ├── migrate/migrate.go
@@ -54,14 +71,17 @@ protos/<domain>/v1/         # .proto files
 
 ## Conventions
 
-- All tasks run via `make <target>` — never run go/buf/docker commands directly
+- All tasks run via `make <target>` from the project root — never run go/buf/docker commands directly
+- `make infra` starts infrastructure (docker compose), `make start` starts the server locally via air, `make debug` starts with delve
+- `make codegen` uses `docker build --target generate` to run buf + sqlc in a container
 - **Interface-first**: every package exposes an interface as its public API. Structs are unexported. Constructors return the interface type.
 - **Dependencies struct**: each layer defines an exported `Dependencies` struct. Constructors take it as the single parameter. The private struct inlines the fields directly.
 - **File prefixes**: `route_<rpc>.go` in api, `op_<operation>.go` in domain, `event_<concern>.go` in outbox.
 - **API versioning**: `internal/api/<domain>/v1/` mirrors the proto package `<domain>.v1`.
-- **Single server**: one h2c server on `:8080` — `/health` (no interceptors) and Connect RPC paths (with per-handler interceptors).
+- **Single server**: one server on `:8080` — `/health` (no interceptors) and RPC paths (with per-handler interceptors). Connect-RPC uses h2c; gRPC uses native gRPC server with a health endpoint.
 - Generated code goes to `gen/` (gitignored).
-- Use `connect.NewError(connect.CodeXxx, err)` for RPC errors.
+- Connect-RPC: use `connect.NewError(connect.CodeXxx, err)` for RPC errors.
+- gRPC: use `status.Errorf(codes.Xxx, msg)` for RPC errors.
 - Proto files live under `protos/` with buf module configuration.
 
 ## Layer Rules

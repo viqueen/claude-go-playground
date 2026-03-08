@@ -9,16 +9,28 @@ Depends on: `do-domain` agent PR (internal/domain/<domain>/ must exist).
 
 The user will specify:
 - The **domain name** (e.g., `content`)
+- The **project**: `connect-rpc-backend` or `grpc-backend`
 - Any specific mapping concerns (e.g., custom proto ↔ sqlc field mappings)
+
+## Project Root
+
+All file paths below are relative to the chosen project folder.
+All `make` commands must be run from the project root.
+
+The framework is determined by the project:
+- `connect-rpc-backend` → Connect-RPC (uses `connectutil`, `connectapp`, `connect.Request` wrappers)
+- `grpc-backend` → gRPC (uses `grpcutil`, `grpcapp`, direct proto messages, `Unimplemented*Server` embedding)
 
 ## What to generate
 
 ### 1. `internal/api/<domain>/v1/handler.go`
 
-Private struct implementing the Connect-generated service interface.
+Private struct implementing the generated service interface.
 
 The Go package name must be `api<domain><version>` (e.g., `apicontentv1` for `internal/api/content/v1/`).
 Import aliases must follow a consistent naming convention.
+
+#### If Connect-RPC
 
 ```go
 package apicontentv1
@@ -53,11 +65,55 @@ var errorMappings = map[error]connect.Code{
 }
 ```
 
-Import alias conventions:
+Import alias conventions (Connect-RPC):
 - `<domain>v1` for proto types: `contentv1 "<module>/gen/sdk/content/v1"`
 - `<domain>v1connect` for connect service: `contentv1connect "<module>/gen/sdk/content/v1/contentv1connect"`
 - `db<domain>` for sqlc types: `dbcontent "<module>/gen/db/content"`
 - `<domain>domain` for domain service: `contentdomain "<module>/internal/domain/content"`
+
+#### If gRPC
+
+```go
+package apicontentv1
+
+import (
+	contentv1 "<module>/gen/sdk/content/v1"
+	contentv1grpc "<module>/gen/sdk/content/v1/contentv1grpc"
+	dbcontent "<module>/gen/db/content"
+	contentdomain "<module>/internal/domain/content"
+	"<module>/pkg/grpcutil"
+
+	"google.golang.org/grpc/codes"
+)
+
+// Dependencies defines the dependencies for the content API handler.
+type Dependencies struct {
+	Service contentdomain.Service
+}
+
+// New returns the gRPC-generated service server. Struct is private.
+func New(deps Dependencies) contentv1grpc.ContentServiceServer {
+	return &handler{service: deps.Service}
+}
+
+type handler struct {
+	contentv1grpc.UnimplementedContentServiceServer
+	service contentdomain.Service
+}
+
+var errorMappings = map[error]codes.Code{
+	contentdomain.ErrNotFound:      codes.NotFound,
+	contentdomain.ErrAlreadyExists: codes.AlreadyExists,
+}
+```
+
+Import alias conventions (gRPC):
+- `<domain>v1` for proto types: `contentv1 "<module>/gen/sdk/content/v1"`
+- `<domain>v1grpc` for gRPC service: `contentv1grpc "<module>/gen/sdk/content/v1/contentv1grpc"`
+- `db<domain>` for sqlc types: `dbcontent "<module>/gen/db/content"`
+- `<domain>domain` for domain service: `contentdomain "<module>/internal/domain/content"`
+
+Note: gRPC handlers embed `Unimplemented<Service>Server` for forward compatibility.
 
 ### 2. `internal/api/<domain>/v1/mapper.go`
 
@@ -73,6 +129,8 @@ Mapping functions between proto types and sqlc models:
 
 Each file contains a single method on the handler:
 
+#### If Connect-RPC
+
 ```go
 func (h *handler) Create<Resource>(
     ctx context.Context,
@@ -87,6 +145,26 @@ func (h *handler) Create<Resource>(
     }), nil
 }
 ```
+
+#### If gRPC
+
+```go
+func (h *handler) Create<Resource>(
+    ctx context.Context,
+    req *<domain>v1.Create<Resource>Request,
+) (*<domain>v1.Create<Resource>Response, error) {
+    result, err := h.service.Create(ctx, fromProtoCreate(req))
+    if err != nil {
+        return nil, grpcutil.NewErrorFrom(err, errorMappings)
+    }
+    return &<domain>v1.Create<Resource>Response{
+        <Resource>: toProto(result),
+    }, nil
+}
+```
+
+Key differences: gRPC handlers take proto messages directly (no `connect.Request` wrapper)
+and return proto messages directly (no `connect.Response` wrapper).
 
 ### 4. `internal/outbox/river.go` — Update event mapping
 
@@ -170,21 +248,23 @@ Update the setup files to register the new domain:
 
 - `setup_connections.go` — register outbox workers with river (`river.AddWorker`)
 - `setup_domains.go` — add domain to `Domains` struct, wire service with dependencies
-- `setup_gateway.go` — register Connect handler with interceptors, add to reflection
+- `setup_gateway.go`:
+  - **Connect-RPC**: register Connect handler with `connect.WithInterceptors`, add path to mux
+  - **gRPC**: register gRPC service on `application.Server()` via generated `Register<Service>Server()`
 
 ## Conventions
 
 - **Go package naming**: `api<domain><version>` (e.g., `apicontentv1` for `internal/api/content/v1/`)
 - **API versioning**: `internal/api/<domain>/v1/` mirrors the proto package `<domain>.v1`. When a v2 proto is introduced, handlers go under `internal/api/<domain>/v2/`.
-- **Import aliases**: `<domain>v1` (proto), `<domain>v1connect` (connect), `db<domain>` (sqlc), `<domain>domain` (domain service), `<domain>events` (outbox events)
+- **Import aliases**: `<domain>v1` (proto), `<domain>v1connect` or `<domain>v1grpc` (service), `db<domain>` (sqlc), `<domain>domain` (domain service), `<domain>events` (outbox events)
 - **File prefixes**: `route_<rpc>.go` in api, `event_<concern>.go` in outbox
-- **Error mappings**: defined as package-level var in `handler.go`, used by all routes via `connectutil.NewErrorFrom`
+- **Error mappings**: defined as package-level var in `handler.go`, used by all routes via `connectutil.NewErrorFrom` (Connect-RPC) or `grpcutil.NewErrorFrom` (gRPC)
 - **Mapper isolation**: all proto ↔ sqlc conversion lives in `mapper.go`, nowhere else
 - **One method per file**: route files contain exactly one handler method
 
 ## Layer Rules
 
-- `internal/api/` can depend on: `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/connectutil`
+- `internal/api/` can depend on: `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/connectutil` or `pkg/grpcutil`
 - `internal/outbox/` can depend on: `gen/db/`, `pkg/outbox`, river
 - `cmd/` wires everything together
 
@@ -192,8 +272,8 @@ Update the setup files to register the new domain:
 
 1. Run `make vet` — fix all compilation errors
 2. Run `make build` — confirm Docker build works
-3. Run `make start` — confirm server boots with new handler registered
-4. Run `make stop`
+3. Run `make start` — starts infra + server via air, confirm `/health` returns 200
+4. Run `make teardown` — stops infra
 
 ## Checklist
 
