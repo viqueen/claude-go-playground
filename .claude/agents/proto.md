@@ -12,7 +12,7 @@ The user will specify:
 
 ## What to generate
 
-### 1. Proto Definition — `api/<domain>/v1/<domain>.proto`
+### 1. Proto Definition — `protos/<domain>/v1/<domain>.proto`
 
 ```protobuf
 syntax = "proto3";
@@ -70,7 +70,7 @@ Add a new entry to the `sql:` list in `sqlc.yaml`:
   gen:
     go:
       package: "<domain>"
-      out: "gen/sqlc/<domain>"
+      out: "gen/db/<domain>"
       sql_package: "pgx/v5"
       overrides:
         - db_type: "uuid"
@@ -83,7 +83,7 @@ Add a new entry to the `sql:` list in `sqlc.yaml`:
             type: "Time"
 ```
 
-### 5. buf.yaml (if not present) — `api/<domain>/v1/buf.yaml`
+### 5. buf.yaml (if not present) — `protos/<domain>/v1/buf.yaml`
 
 ```yaml
 version: v2

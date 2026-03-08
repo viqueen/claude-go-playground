@@ -13,7 +13,7 @@ The user will specify:
 
 ## What to generate
 
-### 1. `internal/api/<domain>/handler.go`
+### 1. `internal/api/<domain>/v1/handler.go`
 
 Private struct implementing the Connect-generated service interface:
 
@@ -38,7 +38,7 @@ var errorMappings = map[error]connect.Code{
 }
 ```
 
-### 2. `internal/api/<domain>/mapper.go`
+### 2. `internal/api/<domain>/v1/mapper.go`
 
 Mapping functions between proto types and sqlc models:
 
@@ -48,7 +48,7 @@ Mapping functions between proto types and sqlc models:
   - Uses `pgtype.Text{String: val, Valid: true}` for nullable string fields from `sqlc.narg()`
   - Uses `pgtype.Int4{Int32: val, Valid: true}` for nullable int fields
 
-### 3. `internal/api/<domain>/route_<rpc>.go` — One file per RPC
+### 3. `internal/api/<domain>/v1/route_<rpc>.go` — One file per RPC
 
 Each file contains a single method on the handler:
 
@@ -90,6 +90,7 @@ Update the setup files to register the new domain:
 
 ## Conventions
 
+- **API versioning**: `internal/api/<domain>/v1/` mirrors the proto package `<domain>.v1`. When a v2 proto is introduced, handlers go under `internal/api/<domain>/v2/`.
 - **File prefixes**: `route_<rpc>.go` in api, `event_<concern>.go` in outbox
 - **Error mappings**: defined as package-level var in `handler.go`, used by all routes via `connectutil.NewErrorFrom`
 - **Mapper isolation**: all proto ↔ sqlc conversion lives in `mapper.go`, nowhere else
@@ -97,8 +98,8 @@ Update the setup files to register the new domain:
 
 ## Layer Rules
 
-- `internal/api/` can depend on: `internal/domain/`, `gen/proto/`, `gen/sqlc/`, `pkg/connectutil`
-- `internal/outbox/` can depend on: `gen/sqlc/`, `pkg/outbox`, river
+- `internal/api/` can depend on: `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/connectutil`
+- `internal/outbox/` can depend on: `gen/db/`, `pkg/outbox`, river
 - `cmd/` wires everything together
 
 ## Post-Generation

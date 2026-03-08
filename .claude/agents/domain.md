@@ -2,7 +2,7 @@
 
 Implement the business logic for a domain. This PR is auditable as: **"Is the logic correct?"**
 
-Depends on: `proto` agent PR (gen/sqlc/ and gen/proto/ must exist).
+Depends on: `proto` agent PR (gen/db/ and gen/sdk/ must exist).
 
 ## Inputs
 
@@ -36,17 +36,17 @@ Service interface + private struct + constructor:
 package <domain>
 
 type Service interface {
-    Create(ctx context.Context, params sqlc<domain>.Create<Resource>Params) (*sqlc<domain>.<Resource>, error)
-    Get(ctx context.Context, id uuid.UUID) (*sqlc<domain>.<Resource>, error)
-    List(ctx context.Context, pageSize int32, pageToken string) ([]sqlc<domain>.<Resource>, string, error)
-    Update(ctx context.Context, id uuid.UUID, params sqlc<domain>.Update<Resource>Params) (*sqlc<domain>.<Resource>, error)
+    Create(ctx context.Context, params db<domain>.Create<Resource>Params) (*db<domain>.<Resource>, error)
+    Get(ctx context.Context, id uuid.UUID) (*db<domain>.<Resource>, error)
+    List(ctx context.Context, pageSize int32, pageToken string) ([]db<domain>.<Resource>, string, error)
+    Update(ctx context.Context, id uuid.UUID, params db<domain>.Update<Resource>Params) (*db<domain>.<Resource>, error)
     Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type Dependencies struct {
     Pool    *pgxpool.Pool
-    Queries *sqlc<domain>.Queries
-    Cache   cache.Cache[uuid.UUID, *sqlc<domain>.<Resource>]
+    Queries *db<domain>.Queries
+    Cache   cache.Cache[uuid.UUID, *db<domain>.<Resource>]
     Outbox  outbox.Outbox[pgx.Tx]
 }
 
@@ -82,8 +82,8 @@ Each read operation:
 
 ## Layer Rules
 
-- Can depend on: `gen/sqlc/<domain>`, `pkg/cache`, `pkg/outbox`
-- Must NOT depend on: `gen/proto/`, `internal/api/`, `internal/outbox/`, `cmd/`
+- Can depend on: `gen/db/<domain>`, `pkg/cache`, `pkg/outbox`
+- Must NOT depend on: `gen/sdk/`, `internal/api/`, `internal/outbox/`, `cmd/`
 
 ## Post-Generation
 
@@ -98,5 +98,5 @@ Each read operation:
 - [ ] All writes use transaction + outbox + cache pattern
 - [ ] All reads check cache first
 - [ ] `pgx.ErrNoRows` mapped to `ErrNotFound`
-- [ ] No imports from `internal/api/`, `internal/outbox/`, `cmd/`, or `gen/proto/`
+- [ ] No imports from `internal/api/`, `internal/outbox/`, `cmd/`, or `gen/sdk/`
 - [ ] `make vet` passes

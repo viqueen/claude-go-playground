@@ -27,7 +27,7 @@ cmd/server/
 ├── setup_domains.go
 └── setup_gateway.go
 internal/
-├── api/<domain>/           # handler, mapper, route_<rpc>.go
+├── api/<domain>/v1/        # handler, mapper, route_<rpc>.go (versioned to match proto package)
 ├── domain/<domain>/        # service, errors, op_<operation>.go
 └── outbox/
     ├── river.go            # River implementation of pkg/outbox.Outbox
@@ -41,14 +41,14 @@ pkg/
 ├── outbox/outbox.go
 └── migrate/migrate.go
 gen/
-├── proto/                  # buf-generated (gitignored)
-└── sqlc/<domain>/          # sqlc-generated (gitignored)
+├── sdk/                    # buf-generated (gitignored)
+└── db/<domain>/            # sqlc-generated (gitignored)
 sql/
 ├── migrations/
 │   ├── migrations.go       # go:embed for .sql files
 │   └── 001_create_<domain>.sql
 └── queries/<domain>/<domain>.sql
-api/<domain>/v1/            # .proto files
+protos/<domain>/v1/         # .proto files
 ```
 
 ## Conventions
@@ -57,17 +57,18 @@ api/<domain>/v1/            # .proto files
 - **Interface-first**: every package exposes an interface as its public API. Structs are unexported. Constructors return the interface type.
 - **Dependencies struct**: each layer defines an exported `Dependencies` struct. Constructors take it as the single parameter. The private struct inlines the fields directly.
 - **File prefixes**: `route_<rpc>.go` in api, `op_<operation>.go` in domain, `event_<concern>.go` in outbox.
+- **API versioning**: `internal/api/<domain>/v1/` mirrors the proto package `<domain>.v1`.
 - **Single server**: one h2c server on `:8080` — `/health` (no interceptors) and Connect RPC paths (with per-handler interceptors).
 - Generated code goes to `gen/` (gitignored).
 - Use `connect.NewError(connect.CodeXxx, err)` for RPC errors.
-- Proto files live under `api/` with buf module configuration.
+- Proto files live under `protos/` with buf module configuration.
 
 ## Layer Rules
 
 - `pkg/` depends on nothing — purely generic, extractable as a shared module
-- `internal/domain/` depends on `gen/sqlc/` + `pkg/`
-- `internal/outbox/` depends on `gen/sqlc/` + `pkg/outbox` + river
-- `internal/api/` depends on `internal/domain/`, `gen/proto/`, `gen/sqlc/`, `pkg/`
+- `internal/domain/` depends on `gen/db/` + `pkg/`
+- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + river
+- `internal/api/` depends on `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/`
 - `cmd/` wires all layers together
 
 ## gRPC Error Mapping

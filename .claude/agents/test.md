@@ -60,7 +60,7 @@ These are **integration tests using testcontainers** — they run against a real
 - Test actual SQL queries and transaction behavior
 - Test error cases: not found, already exists, etc.
 
-### 3. API Integration Tests — `internal/api/<domain>/handler_test.go`
+### 3. API Integration Tests — `internal/api/<domain>/v1/handler_test.go`
 
 Test the full RPC lifecycle using Connect's test utilities:
 
