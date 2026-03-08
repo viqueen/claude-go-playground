@@ -53,17 +53,22 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### API Tests — `internal/api/<domain>/v1/`
 
-- [ ] `handler_test.go` has `setupHandler(t)` returning a client + context
-- [ ] **(Connect-RPC)** Uses `httptest.NewServer` with the Connect handler
-- [ ] **(Connect-RPC)** Uses the generated Connect client to make RPC calls
-- [ ] **(gRPC)** Uses `bufconn` with `grpc.NewServer` and `grpc.NewClient`
-- [ ] **(gRPC)** Uses the generated gRPC client to make RPC calls
+- [ ] `handler_test.go` has `setupHandler(t)` returning `*testClients[...]` + context
+- [ ] `handler_test.go` defines `accessLevel` enum: `anonymous`, `standard`, `admin`, `elevated`
+- [ ] `handler_test.go` defines `testClients[T]` struct with all four client fields
+- [ ] Each client injects auth via interceptor (Connect-RPC: header, gRPC: metadata)
+- [ ] `anonymous` client sends no auth credentials
+- [ ] **(Connect-RPC)** Uses `httptest.NewServer` with per-level Connect clients
+- [ ] **(gRPC)** Uses `bufconn` with per-level gRPC clients
 - [ ] Uses testcontainers for the database backend (no mocks)
 - [ ] Each `route_*_test.go` has a single parent test function (e.g., `TestCreateContent`)
 - [ ] Tests cover all RPCs: create, get, list, update, delete
-- [ ] Tests verify correct Connect error codes on failures:
-  - [ ] **(Connect-RPC)** Not found → `connect.CodeNotFound`, Already exists → `connect.CodeAlreadyExists`, Invalid argument → `connect.CodeInvalidArgument`
-  - [ ] **(gRPC)** Not found → `codes.NotFound`, Already exists → `codes.AlreadyExists`, Invalid argument → `codes.InvalidArgument` (checked via `status.Code(err)`)
+- [ ] Every RPC tests unauthenticated path via `clients.anonymous` → `Unauthenticated`
+- [ ] Admin-only RPCs test `clients.standard` → `PermissionDenied`
+- [ ] Elevated RPCs test `clients.admin` → `PermissionDenied`
+- [ ] Tests verify correct error codes:
+  - [ ] **(Connect-RPC)** `connect.CodeUnauthenticated`, `connect.CodePermissionDenied`, `connect.CodeNotFound`, etc.
+  - [ ] **(gRPC)** `codes.Unauthenticated`, `codes.PermissionDenied`, `codes.NotFound`, etc. (via `status.Code(err)`)
 
 ### Outbox Worker Tests — `internal/outbox/<domain>/`
 
@@ -73,7 +78,7 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 ### Test Case Ordering
 
 - [ ] Error cases come **before** success cases in every parent test
-- [ ] API layer ordering: unauthenticated → invalid argument → permission denied → not found → already exists → success
+- [ ] API layer ordering: unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin ops) → not found → already exists → success
 - [ ] Domain layer ordering: not found → already exists → precondition failed → success
 - [ ] Domain tests do NOT test invalid argument (that's the API/interceptor layer)
 

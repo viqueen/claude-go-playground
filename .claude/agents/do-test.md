@@ -186,6 +186,43 @@ func TestGet(t *testing.T) {
 This file contains **only** the test setup — server start, client creation,
 service wiring. No test functions here.
 
+The setup returns four clients representing different access levels:
+
+| Client | Access Level | Purpose |
+|--------|-------------|---------|
+| `anonymous` | No auth | Tests unauthenticated paths |
+| `standard` | Authenticated user | Tests normal user operations |
+| `admin` | Authenticated admin | Tests admin-only operations |
+| `elevated` | System-level | Tests system/service-to-service operations |
+
+Each client injects its access level via request headers (Connect-RPC) or metadata (gRPC).
+The auth interceptor reads this to determine the caller's identity and permissions.
+
+```go
+// accessLevel represents the four test access levels.
+type accessLevel int
+
+const (
+	anonymous accessLevel = iota
+	standard
+	admin
+	elevated
+)
+```
+
+##### `testClients` struct
+
+All four clients are returned in a struct so route tests can pick the right one:
+
+```go
+type testClients[T any] struct {
+	anonymous T
+	standard  T
+	admin     T
+	elevated  T
+}
+```
+
 ##### If Connect-RPC
 
 ```go
@@ -204,7 +241,7 @@ import (
 	apicontentv1 "<module>/internal/api/content/v1"
 )
 
-func setupHandler(t *testing.T) (contentv1connect.ContentServiceClient, context.Context) {
+func setupHandler(t *testing.T) (*testClients[contentv1connect.ContentServiceClient], context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -212,18 +249,41 @@ func setupHandler(t *testing.T) (contentv1connect.ContentServiceClient, context.
 	// ...
 
 	handler := apicontentv1.New(apicontentv1.Dependencies{Service: svc})
-	path, h := contentv1connect.NewContentServiceHandler(handler)
+	path, h := contentv1connect.NewContentServiceHandler(handler, connect.WithInterceptors(interceptors...))
 
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	client := contentv1connect.NewContentServiceClient(
-		http.DefaultClient,
-		server.URL,
-	)
-	return client, ctx
+	newClient := func(level accessLevel) contentv1connect.ContentServiceClient {
+		return contentv1connect.NewContentServiceClient(
+			http.DefaultClient,
+			server.URL,
+			connect.WithInterceptors(authInterceptor(level)),
+		)
+	}
+
+	return &testClients[contentv1connect.ContentServiceClient]{
+		anonymous: newClient(anonymous),
+		standard:  newClient(standard),
+		admin:     newClient(admin),
+		elevated:  newClient(elevated),
+	}, ctx
+}
+
+// authInterceptor injects an Authorization header matching the access level.
+// anonymous sends no header. standard/admin/elevated send a bearer token
+// that the auth interceptor on the server side decodes into the appropriate identity.
+func authInterceptor(level accessLevel) connect.UnaryInterceptorFunc {
+	return func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			if level != anonymous {
+				req.Header().Set("Authorization", "Bearer "+testToken(level))
+			}
+			return next(ctx, req)
+		}
+	}
 }
 ```
 
@@ -240,6 +300,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	contentv1grpc "<module>/gen/sdk/content/v1/contentv1grpc"
@@ -248,7 +309,7 @@ import (
 
 const bufSize = 1024 * 1024
 
-func setupHandler(t *testing.T) (contentv1grpc.ContentServiceClient, context.Context) {
+func setupHandler(t *testing.T) (*testClients[contentv1grpc.ContentServiceClient], context.Context) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -258,22 +319,41 @@ func setupHandler(t *testing.T) (contentv1grpc.ContentServiceClient, context.Con
 	handler := apicontentv1.New(apicontentv1.Dependencies{Service: svc})
 
 	lis := bufconn.Listen(bufSize)
-	server := grpc.NewServer()
+	server := grpc.NewServer(serverOpts...)
 	contentv1grpc.RegisterContentServiceServer(server, handler)
 	go func() { _ = server.Serve(lis) }()
 	t.Cleanup(server.GracefulStop)
 
-	conn, err := grpc.NewClient("passthrough:///bufconn",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	newClient := func(level accessLevel) contentv1grpc.ContentServiceClient {
+		opts := []grpc.DialOption{
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		}
+		if level != anonymous {
+			opts = append(opts, grpc.WithUnaryInterceptor(authClientInterceptor(level)))
+		}
+		conn, err := grpc.NewClient("passthrough:///bufconn", opts...)
+		require.NoError(t, err)
+		t.Cleanup(func() { conn.Close() })
+		return contentv1grpc.NewContentServiceClient(conn)
+	}
 
-	client := contentv1grpc.NewContentServiceClient(conn)
-	return client, ctx
+	return &testClients[contentv1grpc.ContentServiceClient]{
+		anonymous: newClient(anonymous),
+		standard:  newClient(standard),
+		admin:     newClient(admin),
+		elevated:  newClient(elevated),
+	}, ctx
+}
+
+// authClientInterceptor injects authorization metadata matching the access level.
+func authClientInterceptor(level accessLevel) grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+testToken(level))
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
 }
 ```
 
@@ -281,6 +361,12 @@ func setupHandler(t *testing.T) (contentv1grpc.ContentServiceClient, context.Con
 
 Each file mirrors the corresponding `route_<rpc>.go` and contains a single parent
 test function with nested `t.Run()` subtests. Error cases come first, success last.
+
+Each test picks the appropriate client for the access level being tested:
+- `clients.anonymous` for unauthenticated tests
+- `clients.standard` for normal user tests
+- `clients.admin` for admin-only operation tests
+- `clients.elevated` for system-level tests
 
 ##### If Connect-RPC
 
@@ -299,55 +385,68 @@ import (
 )
 
 func TestCreateContent(t *testing.T) {
-	client, ctx := setupHandler(t)
+	clients, ctx := setupHandler(t)
+
+	t.Run("unauthenticated — no token", func(t *testing.T) {
+		_, err := clients.anonymous.CreateContent(ctx, connect.NewRequest(validCreateRequest()))
+		require.Error(t, err)
+		assert.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
+	})
 
 	t.Run("invalid argument — empty title", func(t *testing.T) {
-		_, err := client.CreateContent(ctx, connect.NewRequest(&contentv1.CreateContentRequest{
-			Title: "",
-			Body:  "some body",
+		_, err := clients.standard.CreateContent(ctx, connect.NewRequest(&contentv1.CreateContentRequest{
+			Title:  "",
+			Body:   "some body",
 			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
 		}))
 		require.Error(t, err)
 		assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 	})
 
-	t.Run("success", func(t *testing.T) {
-		resp, err := client.CreateContent(ctx, connect.NewRequest(&contentv1.CreateContentRequest{
-			Title:  "my title",
-			Body:   "my body",
-			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
-		}))
+	t.Run("success — standard user", func(t *testing.T) {
+		resp, err := clients.standard.CreateContent(ctx, connect.NewRequest(validCreateRequest()))
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.Msg.Content.Id)
-		assert.Equal(t, "my title", resp.Msg.Content.Title)
 	})
 }
 ```
 
 ```go
-// route_get_content_test.go
+// route_delete_content_test.go — example of admin-only operation
 package apicontentv1_test
 
-func TestGetContent(t *testing.T) {
-	client, ctx := setupHandler(t)
+func TestDeleteContent(t *testing.T) {
+	clients, ctx := setupHandler(t)
 
-	t.Run("not found", func(t *testing.T) {
-		_, err := client.GetContent(ctx, connect.NewRequest(&contentv1.GetContentRequest{
+	t.Run("unauthenticated — no token", func(t *testing.T) {
+		_, err := clients.anonymous.DeleteContent(ctx, connect.NewRequest(&contentv1.DeleteContentRequest{
 			Id: uuid.Must(uuid.NewV4()).String(),
 		}))
 		require.Error(t, err)
-		assert.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+		assert.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
 	})
 
-	t.Run("success", func(t *testing.T) {
-		created, err := client.CreateContent(ctx, connect.NewRequest(validCreateRequest()))
+	t.Run("permission denied — standard user", func(t *testing.T) {
+		// Create as standard, attempt delete as standard
+		created, err := clients.standard.CreateContent(ctx, connect.NewRequest(validCreateRequest()))
 		require.NoError(t, err)
 
-		resp, err := client.GetContent(ctx, connect.NewRequest(&contentv1.GetContentRequest{
+		_, err = clients.standard.DeleteContent(ctx, connect.NewRequest(&contentv1.DeleteContentRequest{
+			Id: created.Msg.Content.Id,
+		}))
+		require.Error(t, err)
+		assert.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+	})
+
+	t.Run("success — admin", func(t *testing.T) {
+		created, err := clients.standard.CreateContent(ctx, connect.NewRequest(validCreateRequest()))
+		require.NoError(t, err)
+
+		resp, err := clients.admin.DeleteContent(ctx, connect.NewRequest(&contentv1.DeleteContentRequest{
 			Id: created.Msg.Content.Id,
 		}))
 		require.NoError(t, err)
-		assert.Equal(t, created.Msg.Content.Id, resp.Msg.Content.Id)
+		assert.True(t, resp.Msg.Success)
 	})
 }
 ```
@@ -370,55 +469,67 @@ import (
 )
 
 func TestCreateContent(t *testing.T) {
-	client, ctx := setupHandler(t)
+	clients, ctx := setupHandler(t)
+
+	t.Run("unauthenticated — no token", func(t *testing.T) {
+		_, err := clients.anonymous.CreateContent(ctx, validCreateRequest())
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
 
 	t.Run("invalid argument — empty title", func(t *testing.T) {
-		_, err := client.CreateContent(ctx, &contentv1.CreateContentRequest{
-			Title: "",
-			Body:  "some body",
+		_, err := clients.standard.CreateContent(ctx, &contentv1.CreateContentRequest{
+			Title:  "",
+			Body:   "some body",
 			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
 		})
 		require.Error(t, err)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
-	t.Run("success", func(t *testing.T) {
-		resp, err := client.CreateContent(ctx, &contentv1.CreateContentRequest{
-			Title:  "my title",
-			Body:   "my body",
-			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
-		})
+	t.Run("success — standard user", func(t *testing.T) {
+		resp, err := clients.standard.CreateContent(ctx, validCreateRequest())
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.Content.Id)
-		assert.Equal(t, "my title", resp.Content.Title)
 	})
 }
 ```
 
 ```go
-// route_get_content_test.go
+// route_delete_content_test.go — example of admin-only operation
 package apicontentv1_test
 
-func TestGetContent(t *testing.T) {
-	client, ctx := setupHandler(t)
+func TestDeleteContent(t *testing.T) {
+	clients, ctx := setupHandler(t)
 
-	t.Run("not found", func(t *testing.T) {
-		_, err := client.GetContent(ctx, &contentv1.GetContentRequest{
+	t.Run("unauthenticated — no token", func(t *testing.T) {
+		_, err := clients.anonymous.DeleteContent(ctx, &contentv1.DeleteContentRequest{
 			Id: uuid.Must(uuid.NewV4()).String(),
 		})
 		require.Error(t, err)
-		assert.Equal(t, codes.NotFound, status.Code(err))
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
 	})
 
-	t.Run("success", func(t *testing.T) {
-		created, err := client.CreateContent(ctx, validCreateRequest())
+	t.Run("permission denied — standard user", func(t *testing.T) {
+		created, err := clients.standard.CreateContent(ctx, validCreateRequest())
 		require.NoError(t, err)
 
-		resp, err := client.GetContent(ctx, &contentv1.GetContentRequest{
+		_, err = clients.standard.DeleteContent(ctx, &contentv1.DeleteContentRequest{
+			Id: created.Content.Id,
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	})
+
+	t.Run("success — admin", func(t *testing.T) {
+		created, err := clients.standard.CreateContent(ctx, validCreateRequest())
+		require.NoError(t, err)
+
+		resp, err := clients.admin.DeleteContent(ctx, &contentv1.DeleteContentRequest{
 			Id: created.Content.Id,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, created.Content.Id, resp.Content.Id)
+		assert.True(t, resp.Success)
 	})
 }
 ```
@@ -463,14 +574,24 @@ Within each parent test, order subtests as:
 1. Error cases first
 2. Success case last
 
-**API layer errors** (tested in `route_*_test.go`):
-unauthenticated → invalid argument → permission denied → not found → already exists → success
+**API layer errors** (tested in `route_*_test.go`), using the appropriate client for each:
+unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin-only ops) → not found (standard/admin) → already exists (standard/admin) → success (standard/admin/elevated as appropriate)
 
 **Domain layer errors** (tested in `op_*_test.go`):
 not found → already exists → precondition failed → success
 
 The domain never sees unauthenticated, invalid argument, or permission denied —
 those are caught by interceptors at the API layer before reaching the domain.
+
+### Access level testing
+
+Each RPC should be tested with the relevant access levels:
+- **All RPCs**: test unauthenticated via `clients.anonymous` → expect `Unauthenticated`
+- **Standard operations** (create, get, list, update): test success via `clients.standard`
+- **Admin-only operations** (delete, bulk operations): test `clients.standard` → expect `PermissionDenied`, test success via `clients.admin`
+- **Elevated operations** (system triggers, internal-only RPCs): test `clients.admin` → expect `PermissionDenied`, test success via `clients.elevated`
+
+The access level required for each RPC is domain-specific — the user will specify which operations require which levels.
 
 ### Test naming
 
@@ -511,9 +632,15 @@ No shared state between parent tests. Subtests within a parent may share setup.
 - [ ] `service_test.go` contains only setup — no `Test*` functions
 - [ ] One `op_<operation>_test.go` per domain operation
 - [ ] `handler_test.go` contains only setup — no `Test*` functions
-- [ ] Connect-RPC: setup uses `httptest.NewServer` + Connect client
-- [ ] gRPC: setup uses `bufconn` + `grpc.NewClient` + gRPC client
+- [ ] `handler_test.go` defines `accessLevel` enum: `anonymous`, `standard`, `admin`, `elevated`
+- [ ] `handler_test.go` defines `testClients[T]` struct with all four access levels
+- [ ] `setupHandler` returns `*testClients[...]` (not a single client)
+- [ ] Connect-RPC: setup uses `httptest.NewServer` + per-level Connect clients with auth interceptor
+- [ ] gRPC: setup uses `bufconn` + per-level gRPC clients with auth metadata interceptor
 - [ ] One `route_<rpc>_test.go` per API route
+- [ ] Route tests use `clients.anonymous` for unauthenticated, `clients.standard`/`admin`/`elevated` for auth tests
+- [ ] Every RPC tests unauthenticated path via `clients.anonymous`
+- [ ] Admin-only RPCs test permission denied via `clients.standard`
 - [ ] Connect-RPC: tests use `connect.NewRequest`, `connect.CodeOf(err)`, `resp.Msg`
 - [ ] gRPC: tests pass proto directly, use `status.Code(err)`, access response fields directly
 - [ ] Error cases come before success cases in every parent test
