@@ -186,7 +186,7 @@ clean_on_exit = true
 
 ### .air.debug.toml
 
-Debug-mode configuration. Builds with debug symbols disabled optimizations,
+Debug-mode configuration. Builds with debug symbols enabled and compiler optimizations disabled,
 runs via delve on port 2345.
 
 ```toml
@@ -679,7 +679,10 @@ import (
 )
 
 func NewServerOpts() []grpc.ServerOption {
-	validateInterceptor, _ := protovalidate_middleware.NewUnaryServerInterceptor()
+	validateInterceptor, err := protovalidate_middleware.NewUnaryServerInterceptor()
+	if err != nil {
+		panic(fmt.Sprintf("failed to create protovalidate interceptor: %v", err))
+	}
 	return []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(),
@@ -1057,7 +1060,7 @@ After writing all files, run through these steps in order. Fix any errors before
 
 1. **`make vet`** — generates code (codegen via docker build), resolves dependencies (tidy), then runs `go vet ./...`. Fix all issues before continuing.
 2. **`make build`** — builds the full Docker image end-to-end. Confirms the build pipeline works.
-3. **`make start`** — starts infra (docker compose) then the server locally via air. Confirm `/health` returns 200.
+3. **`make start`** — starts infra (docker compose) then the server locally via air. Confirm health endpoint returns 200 (Connect-RPC: `http://localhost:8080/health`, gRPC: `http://localhost:8081/health`).
 4. **`make teardown`** — stops infra.
 
 If `make vet` fails, read the errors carefully — common issues:

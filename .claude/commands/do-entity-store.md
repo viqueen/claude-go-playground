@@ -6,5 +6,4 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 
 Run the `do-entity-store` agent instructions from `.claude/agents/do-entity-store.md`.
 
-Domain: $0
-Project: $1
+Arguments (domain project): $ARGUMENTS

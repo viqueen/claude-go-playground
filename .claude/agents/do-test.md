@@ -194,8 +194,8 @@ There are **two setup functions** to avoid unnecessary testcontainers overhead:
 - `setupHandlerWithDB(t)` — full setup with testcontainers postgres. For tests that reach
   the domain layer (not found, already exists, success).
 
-Each subtest calls the setup function it needs. This means setup happens inside `t.Run()`
-blocks rather than at the parent test level.
+Each parent test calls the setup function it needs. `_Errors` tests call `setupHandler(t)`,
+`_Success` tests call `setupHandlerWithDB(t)`. Subtests within a parent share the setup.
 
 The setup returns four clients representing different access levels:
 
@@ -219,6 +219,21 @@ const (
 	admin
 	elevated
 )
+
+// testToken returns a deterministic bearer token for the given access level.
+// The server-side auth interceptor must decode these to set the caller identity.
+func testToken(level accessLevel) string {
+	switch level {
+	case standard:
+		return "test-standard-token"
+	case admin:
+		return "test-admin-token"
+	case elevated:
+		return "test-elevated-token"
+	default:
+		return ""
+	}
+}
 ```
 
 ##### `testClients` struct
@@ -261,6 +276,7 @@ func startServer(t *testing.T, handler contentv1connect.ContentServiceHandler) (
 	t.Helper()
 	ctx := context.Background()
 
+	interceptors := connectutil.NewInterceptors()
 	path, h := contentv1connect.NewContentServiceHandler(handler, connect.WithInterceptors(interceptors...))
 
 	mux := http.NewServeMux()
@@ -361,7 +377,7 @@ func startServer(t *testing.T, handler contentv1grpc.ContentServiceServer) (*tes
 	ctx := context.Background()
 
 	lis := bufconn.Listen(bufSize)
-	server := grpc.NewServer(serverOpts...)
+	server := grpc.NewServer(grpcutil.NewServerOpts()...)
 	contentv1grpc.RegisterContentServiceServer(server, handler)
 	go func() { _ = server.Serve(lis) }()
 	t.Cleanup(server.GracefulStop)
