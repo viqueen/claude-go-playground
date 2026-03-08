@@ -36,6 +36,10 @@ gen/
 
 Each agent produces a small, auditable PR:
 
+### Build Agents
+
+Each produces a focused, auditable PR:
+
 | Agent | `claude --agent <name>` | PR audit question |
 |-------|------------------------|-------------------|
 | **scaffold** | `claude --agent scaffold` | Does the structure match our architecture? |
@@ -43,6 +47,18 @@ Each agent produces a small, auditable PR:
 | **domain** | `claude --agent domain` | Is the logic correct? |
 | **integrate** | `claude --agent integrate` | Is this wired correctly? |
 | **test** | `claude --agent test` | Is this adequately tested? |
+
+### Review Agents
+
+Subagents invoked during PR review sessions to audit changes:
+
+| Agent | Reviews PRs from | Audit output |
+|-------|-----------------|--------------|
+| **review-scaffold** | scaffold | Structure & conventions checklist |
+| **review-proto** | proto | Contract & data model consistency |
+| **review-domain** | domain | Logic, layer rules, transaction patterns |
+| **review-integrate** | integrate | Wiring, route coverage, outbox events |
+| **review-test** | test | Coverage matrix, testcontainers usage |
 
 ### Workflow
 

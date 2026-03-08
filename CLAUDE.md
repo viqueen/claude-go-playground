@@ -90,6 +90,8 @@ protos/<domain>/v1/         # .proto files
 
 Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
 
+### Build Agents
+
 | Agent | Purpose | PR character |
 |-------|---------|--------------|
 | `scaffold` | Project skeleton with empty stubs | "Does the structure match our architecture?" |
@@ -97,3 +99,13 @@ Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
 | `domain` | Business logic for a domain | "Is the logic correct?" |
 | `integrate` | API handler + outbox + wiring for a domain | "Is this wired correctly?" |
 | `test` | Unit + integration tests for a domain | "Is this adequately tested?" |
+
+### Review Agents (subagents for PR review sessions)
+
+| Agent | Reviews PRs from | Audit question |
+|-------|-----------------|----------------|
+| `review-scaffold` | `scaffold` | Does the structure match our architecture? |
+| `review-proto` | `proto` | Is the data model and API contract right? |
+| `review-domain` | `domain` | Is the logic correct? |
+| `review-integrate` | `integrate` | Is this wired correctly? |
+| `review-test` | `test` | Is this adequately tested? |
