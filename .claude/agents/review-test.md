@@ -16,7 +16,10 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 2. Identify the domain being tested and read the full files (not just the diff).
 
-3. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+3. Identify the project from the PR file paths: `connect-rpc-backend/` or `grpc-backend/`.
+
+4. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+   Items marked **(Connect-RPC)** or **(gRPC)** only apply to the corresponding project.
 
 ## Checklist
 
@@ -50,16 +53,17 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### API Tests — `internal/api/<domain>/v1/`
 
-- [ ] `handler_test.go` has `setupHandler(t)` returning a Connect client + context
-- [ ] Uses `httptest.NewServer` with the Connect handler
-- [ ] Uses the generated Connect client to make RPC calls
+- [ ] `handler_test.go` has `setupHandler(t)` returning a client + context
+- [ ] **(Connect-RPC)** Uses `httptest.NewServer` with the Connect handler
+- [ ] **(Connect-RPC)** Uses the generated Connect client to make RPC calls
+- [ ] **(gRPC)** Uses `bufconn` with `grpc.NewServer` and `grpc.NewClient`
+- [ ] **(gRPC)** Uses the generated gRPC client to make RPC calls
 - [ ] Uses testcontainers for the database backend (no mocks)
 - [ ] Each `route_*_test.go` has a single parent test function (e.g., `TestCreateContent`)
 - [ ] Tests cover all RPCs: create, get, list, update, delete
 - [ ] Tests verify correct Connect error codes on failures:
-  - [ ] Not found → `connect.CodeNotFound`
-  - [ ] Already exists → `connect.CodeAlreadyExists`
-  - [ ] Invalid argument → `connect.CodeInvalidArgument`
+  - [ ] **(Connect-RPC)** Not found → `connect.CodeNotFound`, Already exists → `connect.CodeAlreadyExists`, Invalid argument → `connect.CodeInvalidArgument`
+  - [ ] **(gRPC)** Not found → `codes.NotFound`, Already exists → `codes.AlreadyExists`, Invalid argument → `codes.InvalidArgument` (checked via `status.Code(err)`)
 
 ### Outbox Worker Tests — `internal/outbox/<domain>/`
 

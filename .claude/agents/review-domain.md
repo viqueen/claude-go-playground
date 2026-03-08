@@ -7,6 +7,11 @@ tools: Read, Bash, Glob, Grep
 
 Audit a domain PR. Answer the question: **"Is the logic correct?"**
 
+## Project Root
+
+The PR targets one project: `connect-rpc-backend/` or `grpc-backend/`.
+Identify which project from the PR file paths.
+
 ## How to review
 
 1. Fetch the PR diff:

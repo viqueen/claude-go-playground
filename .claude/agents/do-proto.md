@@ -3,6 +3,11 @@
 Add the API contract for a domain. No Go business logic, no SQL — just the proto definition.
 This PR is auditable as: **"Is the API contract right?"**
 
+## Project Root
+
+All file paths are relative to the chosen project: `connect-rpc-backend/` or `grpc-backend/`.
+The user will specify which project. All `make` commands must be run from the project root.
+
 ## Inputs
 
 The user will specify:

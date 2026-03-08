@@ -8,7 +8,17 @@ Depends on: `do-integrate` agent PR (full domain must be wired).
 
 The user will specify:
 - The **domain name** (e.g., `content`)
+- The **project**: `connect-rpc-backend` or `grpc-backend`
 - Any specific test scenarios or edge cases to cover
+
+## Project Root
+
+All file paths below are relative to the chosen project folder.
+All `make` commands must be run from the project root.
+
+The framework is determined by the project:
+- `connect-rpc-backend` → tests use `httptest.NewServer`, Connect client, `connect.NewRequest`, `connect.CodeOf(err)`, `resp.Msg`
+- `grpc-backend` → tests use `bufconn`, gRPC client, direct proto messages, `status.Code(err)`, direct response fields
 
 ## What to generate
 
@@ -176,6 +186,8 @@ func TestGet(t *testing.T) {
 This file contains **only** the test setup — server start, client creation,
 service wiring. No test functions here.
 
+##### If Connect-RPC
+
 ```go
 package apicontentv1_test
 
@@ -215,10 +227,62 @@ func setupHandler(t *testing.T) (contentv1connect.ContentServiceClient, context.
 }
 ```
 
+##### If gRPC
+
+```go
+package apicontentv1_test
+
+import (
+	"context"
+	"net"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
+	contentv1grpc "<module>/gen/sdk/content/v1/contentv1grpc"
+	apicontentv1 "<module>/internal/api/content/v1"
+)
+
+const bufSize = 1024 * 1024
+
+func setupHandler(t *testing.T) (contentv1grpc.ContentServiceClient, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Wire real service with testcontainers postgres
+	// ...
+
+	handler := apicontentv1.New(apicontentv1.Dependencies{Service: svc})
+
+	lis := bufconn.Listen(bufSize)
+	server := grpc.NewServer()
+	contentv1grpc.RegisterContentServiceServer(server, handler)
+	go func() { _ = server.Serve(lis) }()
+	t.Cleanup(server.GracefulStop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	client := contentv1grpc.NewContentServiceClient(conn)
+	return client, ctx
+}
+```
+
 #### `route_<rpc>_test.go` — One test file per RPC
 
 Each file mirrors the corresponding `route_<rpc>.go` and contains a single parent
 test function with nested `t.Run()` subtests. Error cases come first, success last.
+
+##### If Connect-RPC
 
 ```go
 // route_create_content_test.go
@@ -287,6 +351,81 @@ func TestGetContent(t *testing.T) {
 	})
 }
 ```
+
+##### If gRPC
+
+```go
+// route_create_content_test.go
+package apicontentv1_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	contentv1 "<module>/gen/sdk/content/v1"
+)
+
+func TestCreateContent(t *testing.T) {
+	client, ctx := setupHandler(t)
+
+	t.Run("invalid argument — empty title", func(t *testing.T) {
+		_, err := client.CreateContent(ctx, &contentv1.CreateContentRequest{
+			Title: "",
+			Body:  "some body",
+			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("success", func(t *testing.T) {
+		resp, err := client.CreateContent(ctx, &contentv1.CreateContentRequest{
+			Title:  "my title",
+			Body:   "my body",
+			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.Content.Id)
+		assert.Equal(t, "my title", resp.Content.Title)
+	})
+}
+```
+
+```go
+// route_get_content_test.go
+package apicontentv1_test
+
+func TestGetContent(t *testing.T) {
+	client, ctx := setupHandler(t)
+
+	t.Run("not found", func(t *testing.T) {
+		_, err := client.GetContent(ctx, &contentv1.GetContentRequest{
+			Id: uuid.Must(uuid.NewV4()).String(),
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.NotFound, status.Code(err))
+	})
+
+	t.Run("success", func(t *testing.T) {
+		created, err := client.CreateContent(ctx, validCreateRequest())
+		require.NoError(t, err)
+
+		resp, err := client.GetContent(ctx, &contentv1.GetContentRequest{
+			Id: created.Content.Id,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, created.Content.Id, resp.Content.Id)
+	})
+}
+```
+
+Key differences: gRPC tests pass proto messages directly (no `connect.NewRequest` wrapper),
+access response fields directly (no `.Msg`), and check errors via `status.Code(err)` instead
+of `connect.CodeOf(err)`.
 
 ### 4. Outbox Worker Tests — `internal/outbox/<domain>/event_<concern>_test.go`
 
@@ -372,7 +511,11 @@ No shared state between parent tests. Subtests within a parent may share setup.
 - [ ] `service_test.go` contains only setup — no `Test*` functions
 - [ ] One `op_<operation>_test.go` per domain operation
 - [ ] `handler_test.go` contains only setup — no `Test*` functions
+- [ ] Connect-RPC: setup uses `httptest.NewServer` + Connect client
+- [ ] gRPC: setup uses `bufconn` + `grpc.NewClient` + gRPC client
 - [ ] One `route_<rpc>_test.go` per API route
+- [ ] Connect-RPC: tests use `connect.NewRequest`, `connect.CodeOf(err)`, `resp.Msg`
+- [ ] gRPC: tests pass proto directly, use `status.Code(err)`, access response fields directly
 - [ ] Error cases come before success cases in every parent test
 - [ ] Subtest names follow `<outcome> — <description>` pattern
 - [ ] `require` used for setup/create calls that would panic on failure

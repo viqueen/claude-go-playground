@@ -14,7 +14,10 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
    gh pr diff <number>
    ```
 
-2. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+2. Identify the project from the PR file paths: `connect-rpc-backend/` or `grpc-backend/`.
+
+3. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
+   Items marked **(Connect-RPC)** or **(gRPC)** only apply to the corresponding project.
 
 ## Checklist
 
@@ -30,6 +33,7 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 - [ ] `docker-compose.yml` postgres has a healthcheck and api depends on it with `condition: service_healthy`
 - [ ] `buf.gen.yaml` uses v2 config with managed mode
 - [ ] `buf.gen.yaml` `go_package_prefix` points to `<module>/gen/sdk`
+- [ ] `buf.gen.yaml` uses correct plugin for framework: `connectrpc/go` (Connect-RPC) or `go-grpc` (gRPC)
 - [ ] `buf.gen.yaml` plugins output to `gen/sdk`
 - [ ] `sqlc.yaml` exists with empty `sql: []` list
 - [ ] `.env` has defaults for `DATABASE_URL`, `OPENSEARCH_URL`, `SERVER_ADDR`
@@ -37,9 +41,12 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 ### pkg/ — Interfaces & Conventions
 
 - [ ] `pkg/config` — `Config` struct with `Load()` using godotenv
-- [ ] `pkg/connectapp` — `App` interface with `Handle()` + `Run()`, h2c server, `/health` endpoint
-- [ ] `pkg/connectutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to connect codes
-- [ ] `pkg/connectutil/interceptors.go` — `NewInterceptors()` returns recovery + logging + validate
+- [ ] **(Connect-RPC)** `pkg/connectapp` — `App` interface with `Handle()` + `Run()`, h2c server, `/health` endpoint
+- [ ] **(Connect-RPC)** `pkg/connectutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to connect codes
+- [ ] **(Connect-RPC)** `pkg/connectutil/interceptors.go` — `NewInterceptors()` returns recovery + logging + validate
+- [ ] **(gRPC)** `pkg/grpcapp` — `App` interface with `Server()` + `Run()`, native gRPC server, health check, reflection
+- [ ] **(gRPC)** `pkg/grpcutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to gRPC status codes
+- [ ] **(gRPC)** `pkg/grpcutil/interceptors.go` — `NewServerOpts()` returns recovery + logging + validate interceptors
 - [ ] `pkg/cache` — `Cache[K,V]` interface with in-memory implementation
 - [ ] `pkg/outbox` — `Outbox[T]` interface + `Event` struct, no implementation
 - [ ] `pkg/migrate` — goose wrapper with `Run(db, migrations, dir)`
@@ -52,7 +59,8 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 - [ ] `setup_connections.go` — `Connections` struct with `Pool` + `RiverClient`, `Close()` method
 - [ ] `setup_connections.go` — runs both river migrations and goose migrations
 - [ ] `setup_domains.go` — empty `Domains` struct, `setupDomains()` returns it
-- [ ] `setup_gateway.go` — creates `connectapp.App`, no handlers registered yet
+- [ ] **(Connect-RPC)** `setup_gateway.go` — creates `connectapp.App`, no handlers registered yet
+- [ ] **(gRPC)** `setup_gateway.go` — creates `grpcapp.App` with `grpcutil.NewServerOpts()`, no services registered yet
 
 ### sql/migrations/
 

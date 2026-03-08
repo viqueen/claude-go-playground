@@ -3,6 +3,21 @@
 Generate the full project skeleton with empty stubs. The PR should compile, boot, and do nothing.
 No business logic — just structure.
 
+## Inputs
+
+The user will specify:
+- The **project**: `connect-rpc-backend` (Connect-RPC) or `grpc-backend` (gRPC)
+
+If not specified, ask the user to choose before proceeding.
+
+## Project Root
+
+All file paths below are relative to the chosen project folder.
+All `make` commands must be run from the project root.
+
+- `connect-rpc-backend` → generates `pkg/connectapp`, `pkg/connectutil`, uses `connectrpc/go` buf plugin
+- `grpc-backend` → generates `pkg/grpcapp`, `pkg/grpcutil`, uses `go-grpc` buf plugin
+
 ## What to generate
 
 ### .gitignore
@@ -22,6 +37,8 @@ Run `go mod init <module>` then add dependencies with `go get`.
 
 Uses buf v2 config with managed mode to rewrite `go_package` imports to match the Go module path.
 
+#### If Connect-RPC
+
 ```yaml
 version: v2
 managed:
@@ -37,6 +54,27 @@ plugins:
     out: gen/sdk
     opt: paths=source_relative
   - remote: buf.build/connectrpc/go
+    out: gen/sdk
+    opt: paths=source_relative
+```
+
+#### If gRPC
+
+```yaml
+version: v2
+managed:
+  enabled: true
+  disable:
+    - file_option: go_package
+      module: buf.build/bufbuild/protovalidate
+  override:
+    - file_option: go_package_prefix
+      value: <module>/gen/sdk
+plugins:
+  - protoc_builtin: go
+    out: gen/sdk
+    opt: paths=source_relative
+  - protoc_builtin: go-grpc
     out: gen/sdk
     opt: paths=source_relative
 ```
@@ -106,6 +144,10 @@ clean:
 
 Multi-stage build: generate (buf + sqlc) → build → runtime.
 
+The generate stage installs the protoc plugin matching the project's framework.
+
+#### If Connect-RPC
+
 ```dockerfile
 # Stage 1: Generate proto + sqlc code
 FROM golang:1.24-alpine AS generate
@@ -148,7 +190,54 @@ EXPOSE 8080
 CMD ["/server"]
 ```
 
+#### If gRPC
+
+```dockerfile
+# Stage 1: Generate proto + sqlc code
+FROM golang:1.24-alpine AS generate
+
+RUN apk add --no-cache git
+RUN go install github.com/bufbuild/buf/cmd/buf@latest
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+WORKDIR /build
+
+# buf generate
+COPY buf.gen.yaml ./
+COPY protos/ protos/
+RUN buf dep update protos/
+RUN buf generate protos/
+
+# sqlc generate
+COPY sqlc.yaml ./
+COPY sql ./sql
+RUN sqlc generate
+
+# Stage 2: Build
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+COPY . .
+COPY --from=generate /build/gen ./gen
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o /server ./cmd/server
+
+# Stage 3: Runtime
+FROM alpine:3.21
+
+RUN apk add --no-cache curl
+COPY --from=builder /server /server
+
+EXPOSE 8080
+CMD ["/server"]
+```
+
 ### docker-compose.yml
+
+For `grpc-backend`, the api service exposes both `:8080` (gRPC) and `:8081` (HTTP health sidecar).
+Update the healthcheck to use port 8081 and add `HEALTH_ADDR=:8081` to `.env` and `Config`.
 
 ```yaml
 services:
@@ -259,10 +348,12 @@ func getEnv(key, fallback string) string {
 }
 ```
 
-### pkg/connectapp/app.go
+### pkg/connectapp/app.go (Connect-RPC only)
 
 Reusable Connect RPC application lifecycle. Single server with h2c, path-based routing,
 graceful shutdown. Health and API handlers served from different paths on the same port.
+
+Skip this package entirely if using gRPC — use `pkg/grpcapp` instead.
 
 ```go
 package connectapp
@@ -327,9 +418,105 @@ func (a *app) Run(ctx context.Context) error {
 }
 ```
 
-### pkg/connectutil/errors.go
+### pkg/grpcapp/app.go (gRPC only)
 
-Map domain sentinel errors to connect error codes.
+Reusable gRPC application lifecycle. Native gRPC server with graceful shutdown.
+Health served via gRPC health check protocol + an HTTP `/health` sidecar endpoint.
+
+Skip this package entirely if using Connect-RPC — use `pkg/connectapp` instead.
+
+```go
+package grpcapp
+
+import (
+	"context"
+	"net"
+	"net/http"
+
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
+)
+
+// App is the public interface for the gRPC application.
+type App interface {
+	Server() *grpc.Server
+	Run(ctx context.Context) error
+}
+
+type Option func(*app)
+
+func WithAddr(addr string) Option         { return func(a *app) { a.addr = addr } }
+func WithHealthAddr(addr string) Option   { return func(a *app) { a.healthAddr = addr } }
+func WithServerOpts(opts ...grpc.ServerOption) Option {
+	return func(a *app) { a.serverOpts = append(a.serverOpts, opts...) }
+}
+
+func New(opts ...Option) App {
+	a := &app{addr: ":8080", healthAddr: ":8081"}
+	for _, o := range opts {
+		o(a)
+	}
+	a.server = grpc.NewServer(a.serverOpts...)
+
+	// gRPC health check
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(a.server, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
+	// gRPC reflection
+	reflection.Register(a.server)
+
+	return a
+}
+
+type app struct {
+	addr       string
+	healthAddr string
+	serverOpts []grpc.ServerOption
+	server     *grpc.Server
+}
+
+func (a *app) Server() *grpc.Server {
+	return a.server
+}
+
+func (a *app) Run(ctx context.Context) error {
+	lis, err := net.Listen("tcp", a.addr)
+	if err != nil {
+		return err
+	}
+
+	// HTTP health sidecar for docker-compose/k8s probes
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"up"}`))
+	})
+	healthServer := &http.Server{Addr: a.healthAddr, Handler: healthMux}
+	go func() { _ = healthServer.ListenAndServe() }()
+
+	log.Info().Str("addr", a.addr).Str("health_addr", a.healthAddr).Msg("server started")
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.server.Serve(lis) }()
+
+	select {
+	case <-ctx.Done():
+		a.server.GracefulStop()
+		return healthServer.Close()
+	case err := <-errCh:
+		_ = healthServer.Close()
+		return err
+	}
+}
+```
+
+### pkg/connectutil/errors.go (Connect-RPC only)
+
+Map domain sentinel errors to connect error codes. Skip if using gRPC.
 
 ```go
 package connectutil
@@ -350,9 +537,9 @@ func NewErrorFrom(err error, mappings map[error]connect.Code) *connect.Error {
 }
 ```
 
-### pkg/connectutil/interceptors.go
+### pkg/connectutil/interceptors.go (Connect-RPC only)
 
-Shared interceptors: recovery, logging, buf validate.
+Shared interceptors: recovery, logging, buf validate. Skip if using gRPC.
 
 ```go
 package connectutil
@@ -404,6 +591,89 @@ func NewLoggingInterceptor() connect.UnaryInterceptorFunc {
 				Msg("rpc")
 			return resp, err
 		}
+	}
+}
+```
+
+### pkg/grpcutil/errors.go (gRPC only)
+
+Map domain sentinel errors to gRPC status codes. Skip if using Connect-RPC.
+
+```go
+package grpcutil
+
+import (
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+func NewErrorFrom(err error, mappings map[error]codes.Code) error {
+	for sentinel, code := range mappings {
+		if errors.Is(err, sentinel) {
+			return status.Error(code, err.Error())
+		}
+	}
+	return status.Error(codes.Internal, err.Error())
+}
+```
+
+### pkg/grpcutil/interceptors.go (gRPC only)
+
+Shared interceptors: recovery, logging, buf validate. Skip if using Connect-RPC.
+
+```go
+package grpcutil
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	protovalidate_middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
+)
+
+func NewServerOpts() []grpc.ServerOption {
+	validateInterceptor, _ := protovalidate_middleware.NewUnaryServerInterceptor()
+	return []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(
+			RecoveryInterceptor(),
+			LoggingInterceptor(),
+			validateInterceptor,
+		),
+	}
+}
+
+func RecoveryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = status.Errorf(codes.Internal, "panic: %v", r)
+			}
+		}()
+		return handler(ctx, req)
+	}
+}
+
+func LoggingInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		evt := log.Info()
+		if err != nil {
+			evt = log.Error().Err(err)
+		}
+		evt.
+			Str("method", info.FullMethod).
+			Dur("duration", time.Since(start)).
+			Msg("rpc")
+		return resp, err
 	}
 }
 ```
@@ -687,6 +957,8 @@ func setupDomains(_ *Connections) *Domains {
 Creates the app with interceptors. No handlers registered yet — domains add them
 via the `do-integrate` agent.
 
+#### If Connect-RPC
+
 ```go
 package main
 
@@ -700,6 +972,30 @@ func setupGateway(cfg *config.Config, _ *Domains) connectapp.App {
 
 	// Handlers are registered here by the integrate agent.
 	// Each domain adds its Connect handler with interceptors.
+
+	return application
+}
+```
+
+#### If gRPC
+
+```go
+package main
+
+import (
+	"<module>/pkg/config"
+	"<module>/pkg/grpcapp"
+	"<module>/pkg/grpcutil"
+)
+
+func setupGateway(cfg *config.Config, _ *Domains) grpcapp.App {
+	application := grpcapp.New(
+		grpcapp.WithAddr(cfg.ServerAddr),
+		grpcapp.WithServerOpts(grpcutil.NewServerOpts()...),
+	)
+
+	// Services are registered here by the integrate agent.
+	// Each domain registers its gRPC service on application.Server().
 
 	return application
 }
@@ -738,11 +1034,14 @@ If `make vet` fails, read the errors carefully — common issues:
 - [ ] `Dockerfile` multi-stage build (generate → build → runtime)
 - [ ] `docker-compose.yml` with postgres, opensearch, codegen, api
 - [ ] `buf.gen.yaml` with managed mode and `go_package_prefix` pointing to `gen/sdk`
+- [ ] `buf.gen.yaml` uses correct plugin for chosen framework (`connectrpc/go` or `go-grpc`)
 - [ ] `sqlc.yaml` with empty sql list
 - [ ] `.env` with defaults
 - [ ] `pkg/config` — Config struct + Load()
-- [ ] `pkg/connectapp` — App interface + h2c server + /health
-- [ ] `pkg/connectutil` — NewErrorFrom + interceptors (recovery, logging, validate)
+- [ ] Connect-RPC: `pkg/connectapp` — App interface + h2c server + /health
+- [ ] Connect-RPC: `pkg/connectutil` — NewErrorFrom + interceptors (recovery, logging, validate)
+- [ ] gRPC: `pkg/grpcapp` — App interface + gRPC server + health check + reflection
+- [ ] gRPC: `pkg/grpcutil` — NewErrorFrom + interceptors (recovery, logging, validate)
 - [ ] `pkg/cache` — Cache[K,V] interface + in-memory implementation
 - [ ] `pkg/outbox` — Outbox[T] interface + Event struct
 - [ ] `pkg/migrate` — goose wrapper
