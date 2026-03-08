@@ -4,7 +4,8 @@ A Connect-RPC backend in Go, built incrementally using Claude Code agents.
 
 ## Architecture
 
-See [`_architecture/platform-backend.png`](_architecture/platform-backend.png) for the visual mental model.
+See [`_architecture/platform-backend.png`](_architecture/platform-backend.png) for the visual mental model
+and [`_architecture/ARCHITECTURE.md`](_architecture/ARCHITECTURE.md) for the written reference.
 
 ```
 cmd/server/              # entry point — server bootstrap, wiring
