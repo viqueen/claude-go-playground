@@ -47,6 +47,7 @@ func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 	case spacedomain.EventUpdated:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
+			spaceevents.NewAuditArgs(event),
 		}, nil
 	case spacedomain.EventDeleted:
 		return []river.JobArgs{
@@ -56,6 +57,7 @@ func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 	case spacedomain.EventContentDeleted:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
+			spaceevents.NewAuditArgs(event),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", event.Type)
