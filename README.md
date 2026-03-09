@@ -22,7 +22,7 @@ protos/<domain>/v1/      # protobuf definitions
 sql/                     # migrations + sqlc queries
 gen/
 ├── sdk/                 # buf-generated proto + RPC stubs
-└── db/<domain>/         # sqlc-generated query code
+└── db/<schema>/         # sqlc-generated query code, grouped by schema (e.g. collaboration)
 ```
 
 ## Architecture

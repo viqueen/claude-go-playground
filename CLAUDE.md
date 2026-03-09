@@ -56,16 +56,17 @@ pkg/
 ├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
+├── pagination/pagination.go
 ├── migrate/migrate.go
 └── testkit/containers.go
 gen/
 ├── sdk/                    # buf-generated (gitignored)
-└── db/<domain>/            # sqlc-generated (gitignored)
+└── db/<schema>/            # sqlc-generated (gitignored), grouped by schema (e.g. collaboration)
 sql/
 ├── migrations/
 │   ├── migrations.go       # go:embed for .sql files
-│   └── 001_create_<domain>.sql
-└── queries/<domain>/<domain>.sql
+│   └── 0001_create_<schema>.sql
+└── queries/<schema>/       # sqlc queries grouped by schema (e.g. collaboration/space.sql)
 protos/<domain>/v1/         # .proto files
 ```
 
