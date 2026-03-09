@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,8 +24,10 @@ type Connections struct {
 	RiverClient *river.Client[pgx.Tx]
 }
 
-func (c *Connections) Close(ctx context.Context) {
-	if err := c.RiverClient.Stop(ctx); err != nil {
+func (c *Connections) Close() {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.RiverClient.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("failed to stop river client")
 	}
 	c.Pool.Close()

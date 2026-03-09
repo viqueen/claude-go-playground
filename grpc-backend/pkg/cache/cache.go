@@ -29,13 +29,25 @@ type entry[V any] struct {
 
 func (c *inMemory[K, V]) Get(key K) (V, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	e, ok := c.items[key]
-	if !ok || (!e.expiresAt.IsZero() && time.Now().After(e.expiresAt)) {
+	if !ok {
+		c.mu.RUnlock()
 		var zero V
 		return zero, false
 	}
-	return e.value, true
+	if !e.expiresAt.IsZero() && time.Now().After(e.expiresAt) {
+		c.mu.RUnlock()
+		c.mu.Lock()
+		if e2, ok2 := c.items[key]; ok2 && !e2.expiresAt.IsZero() && time.Now().After(e2.expiresAt) {
+			delete(c.items, key)
+		}
+		c.mu.Unlock()
+		var zero V
+		return zero, false
+	}
+	value := e.value
+	c.mu.RUnlock()
+	return value, true
 }
 
 func (c *inMemory[K, V]) Set(key K, value V, ttl time.Duration) {

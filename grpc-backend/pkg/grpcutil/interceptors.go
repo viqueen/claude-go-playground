@@ -13,10 +13,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func NewServerOpts() []grpc.ServerOption {
+func NewServerOpts() ([]grpc.ServerOption, error) {
 	validator, err := protovalidate.New()
 	if err != nil {
-		panic(fmt.Sprintf("failed to create protovalidate validator: %v", err))
+		return nil, fmt.Errorf("failed to create protovalidate validator: %w", err)
 	}
 	return []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
@@ -24,7 +24,7 @@ func NewServerOpts() []grpc.ServerOption {
 			LoggingInterceptor(),
 			protovalidate_middleware.UnaryServerInterceptor(validator),
 		),
-	}
+	}, nil
 }
 
 func RecoveryInterceptor() grpc.UnaryServerInterceptor {

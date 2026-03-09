@@ -20,7 +20,7 @@ func main() {
 	}
 
 	connections := setupConnections(ctx, cfg)
-	defer connections.Close(ctx)
+	defer connections.Close()
 
 	domains := setupDomains(connections)
 	application := setupGateway(cfg, domains)

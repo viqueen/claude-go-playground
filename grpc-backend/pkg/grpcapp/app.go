@@ -67,8 +67,16 @@ func (a *app) Run(ctx context.Context) error {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"up"}`))
 	})
-	healthServer := &http.Server{Addr: a.healthAddr, Handler: healthMux}
-	go func() { _ = healthServer.ListenAndServe() }()
+	healthServer := &http.Server{Handler: healthMux}
+	healthLis, err := net.Listen("tcp", a.healthAddr)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if err := healthServer.Serve(healthLis); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("health server error")
+		}
+	}()
 
 	log.Info().Str("addr", a.addr).Str("health_addr", a.healthAddr).Msg("server started")
 
