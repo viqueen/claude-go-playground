@@ -83,6 +83,7 @@ protos/<domain>/v1/         # .proto files
 - Connect-RPC: use `connect.NewError(connect.CodeXxx, err)` for RPC errors.
 - gRPC: use `status.Errorf(codes.Xxx, msg)` for RPC errors.
 - Proto files live under `protos/` with buf module configuration.
+- **No magic values**: never hardcode protocol/database constants as raw literals. Use named constants from well-known libraries (e.g., `pgerrcode.UniqueViolation` not `"23505"`, `codes.NotFound` not `5`). If no library constant exists, define a named constant with a doc reference to the spec.
 
 ## Layer Rules
 
