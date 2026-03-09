@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package space.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "space/v1;spacev1";
+
+message SpaceRef {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}

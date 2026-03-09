@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package space.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "space/v1/space_model.proto";
+
+option go_package = "space/v1;spacev1";
+
+service SpaceService {
+  rpc CreateSpace(CreateSpaceRequest) returns (CreateSpaceResponse);
+  rpc GetSpace(GetSpaceRequest) returns (GetSpaceResponse);
+  rpc ListSpaces(ListSpacesRequest) returns (ListSpacesResponse);
+  rpc UpdateSpace(UpdateSpaceRequest) returns (UpdateSpaceResponse);
+  rpc DeleteSpace(DeleteSpaceRequest) returns (google.protobuf.Empty);
+}
+
+// Create — status defaults to DRAFT
+
+message CreateSpaceRequest {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string key = 2 [(buf.validate.field).string = {min_len: 1, max_len: 32, pattern: "^[A-Z][A-Z0-9_-]*$"}];
+  string description = 3;
+  SpaceVisibility visibility = 4 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+
+message CreateSpaceResponse {
+  Space space = 1;
+}
+
+// Get
+
+message GetSpaceRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetSpaceResponse {
+  Space space = 1;
+}
+
+// List
+
+message ListSpacesRequest {
+  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+  string page_token = 2;
+}
+
+message ListSpacesResponse {
+  repeated Space items = 1;
+  string next_page_token = 2;
+}
+
+// Update
+
+message UpdateSpaceRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  Space space = 2 [(buf.validate.field).required = true];
+  google.protobuf.FieldMask update_mask = 3 [(buf.validate.field).required = true];
+}
+
+message UpdateSpaceResponse {
+  Space space = 1;
+}
+
+// Delete
+
+message DeleteSpaceRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
