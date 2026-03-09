@@ -19,9 +19,9 @@ internal/outbox/      OUTBOX     async event processing, data projections
 Supporting packages live outside the layers:
 
 ```
-pkg/                  shared utilities — config, cache, outbox interface, connectapp, etc.
-gen/sdk/              buf-generated proto + connect stubs (gitignored)
-gen/db/               sqlc-generated query code (gitignored)
+pkg/                  shared utilities — config, cache, outbox interface, grpcapp/connectapp, etc.
+gen/sdk/              buf-generated proto + RPC stubs (gitignored)
+gen/db/<schema>/      sqlc-generated query code, grouped by schema (gitignored)
 protos/               protobuf source definitions
 sql/                  migrations + sqlc query files
 ```
@@ -29,13 +29,13 @@ sql/                  migrations + sqlc query files
 ### APP — `cmd/server/`
 
 Application bootstrap. Loads config, opens connections, runs migrations, wires
-domains, and starts the Connect RPC server. No business logic lives here.
+domains, and starts the RPC server. No business logic lives here.
 
 Files:
 - `main.go` — signal context, config, setup sequence, run
 - `setup_connections.go` — postgres pool, river client, goose + river migrations
 - `setup_domains.go` — domain service constructors, dependency injection
-- `setup_gateway.go` — Connect handlers registered on the app with interceptors
+- `setup_gateway.go` — RPC handlers registered on the server with interceptors
 
 ### API — `internal/api/<domain>/v1/`
 
@@ -51,7 +51,7 @@ Files per domain:
 Responsibilities:
 - Validate state (field presence, permission checks)
 - Delegate to domain service
-- Map domain errors → Connect error codes
+- Map domain errors → RPC error codes
 - Map sqlc models → proto responses
 
 Errors originating here: `PERMISSION_DENIED`, `NOT_FOUND`, `ALREADY_EXISTS`, `PRECONDITION_FAILED`
@@ -99,7 +99,7 @@ Every RPC follows the same path through the layers:
 RPC(ctx, Request) → (Response, error)
 
   ┌─────────────────────────────────────────────────┐
-  │ Interceptors (pkg/connectutil)                  │
+  │ Interceptors (pkg/grpcutil or pkg/connectutil)   │
   │   validate ctx  → UNAUTHENTICATED               │
   │   validate request (buf/validate) → INVALID_ARG  │
   ├─────────────────────────────────────────────────┤
@@ -167,8 +167,8 @@ set of error codes it may return.
 | `UNAVAILABLE` | 503 | Service dependency unavailable |
 | `DEADLINE_EXCEEDED` | 504 | Operation timed out |
 
-Error flow: domain raises sentinel errors → handler maps them to Connect codes
-via `connectutil.NewErrorFrom(err, errorMappings)`.
+Error flow: domain raises sentinel errors → handler maps them to RPC error codes
+via `grpcutil.NewErrorFrom(err, errorMappings)` (gRPC) or `connectutil.NewErrorFrom(err, errorMappings)` (Connect-RPC).
 
 ---
 
@@ -178,7 +178,7 @@ via `connectutil.NewErrorFrom(err, errorMappings)`.
 pkg/               → nothing (zero internal dependencies)
 internal/domain/   → gen/db/, pkg/cache, pkg/outbox
 internal/outbox/   → gen/db/, pkg/outbox, river
-internal/api/      → internal/domain/, gen/sdk/, gen/db/, pkg/connectutil
+internal/api/      → internal/domain/, gen/sdk/, gen/db/, pkg/grpcutil or pkg/connectutil
 cmd/server/        → everything (wiring layer)
 ```
 
@@ -221,11 +221,11 @@ Dependencies).
 
 | Alias pattern | Example | Points to |
 |---|---|---|
-| `<domain>v1` | `contentv1` | `gen/sdk/content/v1` |
-| `<domain>v1connect` | `contentv1connect` | `gen/sdk/content/v1/contentv1connect` |
-| `db<domain>` | `dbcontent` | `gen/db/content` |
-| `<domain>domain` | `contentdomain` | `internal/domain/content` |
-| `<domain>events` | `contentevents` | `internal/outbox/content` |
+| `<domain>v1` | `spacev1` | `gen/sdk/space/v1` |
+| `<domain>v1connect` | `spacev1connect` | `gen/sdk/space/v1/spacev1connect` (Connect-RPC only) |
+| `db<schema>` | `dbcollaboration` | `gen/db/collaboration` |
+| `<domain>domain` | `spacedomain` | `internal/domain/space` |
+| `<domain>events` | `spaceevents` | `internal/outbox/space` |
 
 ### Go package naming
 
@@ -253,7 +253,7 @@ initial scaffold. They are added per-domain as needed:
 
 | Concern | Where | When to add |
 |---|---|---|
-| **Authentication** | Interceptor in `pkg/connectutil` | When the service requires caller identity |
+| **Authentication** | Interceptor in `pkg/grpcutil` or `pkg/connectutil` | When the service requires caller identity |
 | **Authorization** | Handler-level check in `route_*.go` | When RPCs have permission requirements |
 | **External service calls** | Domain `Dependencies` struct | When a domain needs to call another service |
 | **Analytics workers** | `internal/outbox/<domain>/event_analytics.go` | When analytics projections are needed |
