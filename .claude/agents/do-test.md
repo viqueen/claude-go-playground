@@ -52,134 +52,7 @@ func SetupPostgres(ctx context.Context, t *testing.T) string {
 - Run migrations (goose) against the container before returning
 - Use `t.Cleanup()` for container teardown
 
-### 2. Domain Tests — `internal/domain/<domain>/`
-
-#### `service_test.go` — Setup only
-
-This file contains **only** the test setup — shared helpers, fixtures, and the service
-constructor used by all operation test files. No test functions here.
-
-```go
-package content_test
-
-import (
-	"context"
-	"testing"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stretchr/testify/require"
-
-	dbcontent "<module>/gen/db/content"
-	contentdomain "<module>/internal/domain/content"
-	"<module>/pkg/testkit"
-	"<module>/pkg/cache"
-	"<module>/pkg/outbox"
-)
-
-type noopOutbox[T any] struct{}
-
-func (n *noopOutbox[T]) Emit(_ context.Context, _ T, _ ...outbox.Event) error {
-	return nil
-}
-
-func setupService(t *testing.T) (contentdomain.Service, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	connStr := testkit.SetupPostgres(ctx, t)
-
-	pool, err := pgxpool.New(ctx, connStr)
-	require.NoError(t, err)
-	t.Cleanup(func() { pool.Close() })
-
-	svc := contentdomain.New(contentdomain.Dependencies{
-		Pool:    pool,
-		Queries: dbcontent.New(pool),
-		Cache:   cache.NewInMemory[uuid.UUID, *dbcontent.Content](),
-		Outbox:  &noopOutbox[pgx.Tx]{},
-	})
-	return svc, ctx
-}
-```
-
-#### `op_<operation>_test.go` — One test file per operation
-
-Each file mirrors the corresponding `op_<operation>.go` and contains a single parent
-test function with nested `t.Run()` subtests. Error cases come first, success last.
-
-Domain tests focus on **business logic errors** (not found, already exists, precondition failed).
-Input validation (invalid argument) is handled by `buf/validate` interceptors at the API layer —
-the domain never sees invalid inputs.
-
-```go
-// op_create_test.go
-package content_test
-
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	dbcontent "<module>/gen/db/content"
-)
-
-func TestCreate(t *testing.T) {
-	svc, ctx := setupService(t)
-
-	t.Run("already exists — duplicate title", func(t *testing.T) {
-		_, err := svc.Create(ctx, dbcontent.CreateContentParams{
-			Title:  "unique title",
-			Body:   "body",
-			Status: 1,
-		})
-		require.NoError(t, err)
-
-		_, err = svc.Create(ctx, dbcontent.CreateContentParams{
-			Title:  "unique title",
-			Body:   "other body",
-			Status: 1,
-		})
-		assert.ErrorIs(t, err, contentdomain.ErrAlreadyExists)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		result, err := svc.Create(ctx, dbcontent.CreateContentParams{
-			Title:  "my title",
-			Body:   "my body",
-			Status: 1,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "my title", result.Title)
-		assert.Equal(t, "my body", result.Body)
-		assert.NotEmpty(t, result.ID)
-	})
-}
-```
-
-```go
-// op_get_test.go
-package content_test
-
-func TestGet(t *testing.T) {
-	svc, ctx := setupService(t)
-
-	t.Run("not found", func(t *testing.T) {
-		_, err := svc.Get(ctx, uuid.Must(uuid.NewV4()))
-		assert.ErrorIs(t, err, contentdomain.ErrNotFound)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		created, err := svc.Create(ctx, validCreateParams())
-		require.NoError(t, err)
-
-		result, err := svc.Get(ctx, created.ID)
-		require.NoError(t, err)
-		assert.Equal(t, created.ID, result.ID)
-	})
-}
-```
-
-### 3. API Tests — `internal/api/<domain>/v1/`
+### 2. API Tests — `internal/api/<domain>/v1/`
 
 #### `handler_test.go` — Setup only
 
@@ -377,7 +250,9 @@ func startServer(t *testing.T, handler contentv1grpc.ContentServiceServer) (*tes
 	ctx := context.Background()
 
 	lis := bufconn.Listen(bufSize)
-	server := grpc.NewServer(grpcutil.NewServerOpts()...)
+	serverOpts, err := grpcutil.NewServerOpts()
+	require.NoError(t, err)
+	server := grpc.NewServer(serverOpts...)
 	contentv1grpc.RegisterContentServiceServer(server, handler)
 	go func() { _ = server.Serve(lis) }()
 	t.Cleanup(server.GracefulStop)
@@ -698,7 +573,7 @@ Key differences: gRPC tests pass proto messages directly (no `connect.NewRequest
 access response fields directly (no `.Msg`), and check errors via `status.Code(err)` instead
 of `connect.CodeOf(err)`.
 
-### 4. Outbox Worker Tests — `internal/outbox/<domain>/event_<concern>_test.go`
+### 3. Outbox Worker Tests — `internal/outbox/<domain>/event_<concern>_test.go`
 
 Test that workers process jobs correctly:
 
@@ -730,7 +605,7 @@ test function with explicit `t.Run()` blocks. Each subtest should be readable on
 
 ### Test case ordering
 
-**API layer** — each route file has two parent tests:
+Each route file has two parent tests:
 
 `Test<Endpoint>_Errors` (interceptor-level, no DB):
 unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin-only ops)
@@ -739,12 +614,6 @@ unauthenticated (anonymous) → invalid argument (standard) → permission denie
 not found → already exists → success cases (one or more, covering the API contract)
 
 Subtests within each parent run in parallel via `t.Parallel()`.
-
-**Domain layer** (tested in `op_*_test.go`):
-not found → already exists → precondition failed → success
-
-The domain never sees unauthenticated, invalid argument, or permission denied —
-those are caught by interceptors at the API layer before reaching the domain.
 
 ### Access level testing
 
@@ -776,21 +645,43 @@ t.Run("creates with required fields", func(t *testing.T) { ... })
 t.Run("creates with optional tags", func(t *testing.T) { ... })
 ```
 
-### File structure: setup file + one test file per operation/route
+### File structure: setup file + one test file per route
 
-- `service_test.go` and `handler_test.go` contain **only** setup (no `Test*` functions)
-- One `op_<operation>_test.go` per domain operation
+- `handler_test.go` contains **only** setup (no `Test*` functions)
 - One `route_<rpc>_test.go` per API route, containing two parent tests: `Test<Endpoint>_Errors` + `Test<Endpoint>_Success`
 
 ### No mocks for infrastructure
 
 Use testcontainers for real postgres and opensearch. Only use a no-op implementation
-for the outbox in domain tests (to isolate from river).
+for the outbox (to isolate from river).
+
+### No domain-layer tests
+
+Do NOT generate `service_test.go` or `op_*_test.go` files. API integration tests with
+`setupHandlerWithDB` exercise the full stack (gRPC/Connect client → interceptors → handler →
+domain → postgres), making standalone domain tests redundant.
+
+### Pitfalls
+
+**Parallel subtests sharing a database**: subtests within a `_Success` parent share the same
+postgres database and run in parallel. Never assert on empty state (e.g., "list returns zero
+items") because sibling subtests may have already inserted rows. Instead, assert on
+`GreaterOrEqual` counts or create unique resources and verify they appear.
+
+**Protovalidate on nested messages**: `buf/validate` (protovalidate) validates ALL fields on
+nested proto messages, even in partial-update RPCs. For example, an `UpdateSpace` request
+contains a `Space` message — even if the `update_mask` only targets `name`, protovalidate
+still validates `key`, `name`, etc. on the full `Space` message. Always populate all
+validated required fields in test proto messages for update operations.
+
+**Deterministic pagination**: if the domain has a `List` RPC with pagination, ensure the
+underlying SQL query uses a deterministic `ORDER BY` (e.g., `created_at, id` not just
+`created_at`). Without a tiebreaker column, rows with the same timestamp produce
+non-deterministic page boundaries and flaky pagination tests.
 
 ### Test isolation
 
-Domain tests: each parent test calls `setupService(t)` at the parent level.
-API tests: each parent test calls its setup at the parent level — `_Errors` calls `setupHandler(t)`,
+Each parent test calls its setup at the parent level — `_Errors` calls `setupHandler(t)`,
 `_Success` calls `setupHandlerWithDB(t)`. Subtests within a parent share the setup and run in
 parallel via `t.Parallel()`. No shared state between parent tests.
 
@@ -802,8 +693,7 @@ parallel via `t.Parallel()`. No shared state between parent tests.
 ## Checklist
 
 - [ ] `pkg/testkit/containers.go` with testcontainers helpers (if not present)
-- [ ] `service_test.go` contains only setup — no `Test*` functions
-- [ ] One `op_<operation>_test.go` per domain operation
+- [ ] No `service_test.go` or `op_*_test.go` files (domain tests are redundant)
 - [ ] `handler_test.go` contains only setup — no `Test*` functions
 - [ ] `handler_test.go` defines `accessLevel` enum: `anonymous`, `standard`, `admin`, `elevated`
 - [ ] `handler_test.go` defines `testClients[T]` struct with all four access levels
@@ -831,7 +721,10 @@ parallel via `t.Parallel()`. No shared state between parent tests.
 - [ ] `assert` used for all other assertions
 - [ ] No table-driven tests
 - [ ] No mocks for databases — testcontainers only
-- [ ] No-op outbox used in domain tests
+- [ ] No-op outbox used in handler setup
 - [ ] `t.Cleanup()` used for all resource teardown
+- [ ] No empty-state assertions in parallel subtests sharing a database
+- [ ] Update test proto messages populate all validated required fields (protovalidate compliance)
+- [ ] List queries use deterministic `ORDER BY` with a tiebreaker column (e.g., `created_at, id`)
 - [ ] Outbox tests verify job args construction
 - [ ] `make test` passes

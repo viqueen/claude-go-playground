@@ -1,0 +1,48 @@
+name: grpc-backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "grpc-backend/**"
+      - ".github/workflows/grpc-backend.yml"
+  pull_request:
+    paths:
+      - "grpc-backend/**"
+      - ".github/workflows/grpc-backend.yml"
+
+defaults:
+  run:
+    working-directory: grpc-backend
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: grpc-backend/go.mod
+          cache-dependency-path: grpc-backend/go.sum
+
+      - name: Build
+        run: make build
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: grpc-backend/go.mod
+          cache-dependency-path: grpc-backend/go.sum
+
+      - name: Test
+        run: make test-coverage
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

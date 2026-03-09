@@ -1,4 +1,4 @@
-.PHONY: codegen tidy vet build test infra start debug teardown clean
+.PHONY: codegen tidy vet build test test-coverage infra start debug teardown clean
 
 # --- codegen ---
 
@@ -18,7 +18,11 @@ build: vet
 	docker build .
 
 test: vet
-	go test ./...
+	go test -race ./...
+
+test-coverage: vet
+	@mkdir -p tmp
+	go test -race -coverprofile=tmp/coverage.out -covermode=atomic ./...
 
 # --- infra ---
 
