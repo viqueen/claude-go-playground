@@ -32,7 +32,12 @@ WHERE id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;
 
 -- name: RestoreSpace :one
-UPDATE collaboration.space
+UPDATE collaboration.space s
 SET deleted_at = NULL, updated_at = now()
-WHERE id = sqlc.arg('id') AND deleted_at IS NOT NULL
+WHERE s.id = sqlc.arg('id')
+  AND s.deleted_at IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM collaboration.space s2
+      WHERE s2.key = s.key AND s2.deleted_at IS NULL
+  )
 RETURNING *;

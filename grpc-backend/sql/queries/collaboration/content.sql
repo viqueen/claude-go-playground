@@ -33,6 +33,11 @@ SET title = COALESCE(sqlc.narg('title'), title),
 WHERE id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;
 
+-- name: SoftDeleteContentBySpace :exec
+UPDATE collaboration.content
+SET deleted_at = now(), updated_at = now()
+WHERE space_id = sqlc.arg('space_id') AND deleted_at IS NULL;
+
 -- name: SoftDeleteContent :one
 UPDATE collaboration.content
 SET deleted_at = now(), updated_at = now()
