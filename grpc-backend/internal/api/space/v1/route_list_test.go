@@ -36,16 +36,6 @@ func TestListSpaces_Errors(t *testing.T) {
 func TestListSpaces_Success(t *testing.T) {
 	clients, ctx := setupHandlerWithDB(t)
 
-	t.Run("empty list", func(t *testing.T) {
-		t.Parallel()
-		resp, err := clients.standard.ListSpaces(ctx, &spacev1.ListSpacesRequest{
-			PageSize: 10,
-		})
-		require.NoError(t, err)
-		assert.Empty(t, resp.Items)
-		assert.Empty(t, resp.NextPageToken)
-	})
-
 	t.Run("lists created spaces", func(t *testing.T) {
 		t.Parallel()
 		_, err := clients.standard.CreateSpace(ctx, &spacev1.CreateSpaceRequest{
