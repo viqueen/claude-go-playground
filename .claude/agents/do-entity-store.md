@@ -12,16 +12,16 @@ The user will specify which project. All `make` commands must be run from the pr
 ## Inputs
 
 The user will specify:
-- The **domain name** (e.g., `content`, `workspace`, `billing`)
+- The **domain name** (e.g., `collaboration`, `billing`) — a domain may group multiple proto packages (e.g., `collaboration` covers `space.v1` and `content.v1` protos)
 - The **entities** in that domain with their fields and types
 - Any indexes, constraints, or relationships between entities
 
-Cross-reference with the proto definitions in `protos/<domain>/v1/` to ensure the schema
-aligns with the API contract.
+Cross-reference with the proto definitions in `protos/` to ensure the schema
+aligns with the API contract. The domain name does not need to match any single proto package.
 
 ## What to generate
 
-### 1. SQL Migration — `sql/migrations/<NNN>_create_<domain>.sql`
+### 1. SQL Migration — `sql/migrations/<NNNN>_create_<domain>.sql`
 
 A single migration file per domain. Creates a dedicated Postgres schema for the domain
 and all entity tables within it.
@@ -67,7 +67,8 @@ Conventions:
 - Proto `google.protobuf.Timestamp` maps to `TIMESTAMPTZ`
 - Foreign keys use `REFERENCES <table>(id)` with appropriate `ON DELETE` behavior
 - Down migration drops tables in reverse order (dependents first)
-- Number the migration sequentially after existing ones
+- Number the migration sequentially with 4-digit format (e.g., `0001`, `0002`)
+- If a placeholder stub migration exists, replace it with the real migration
 
 ### 2. sqlc Queries — `sql/queries/<domain>/`
 

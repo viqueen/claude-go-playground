@@ -21,18 +21,18 @@ Identify which project from the PR file paths.
    gh pr diff <number>
    ```
 
-2. Identify the domain and all its entities. Cross-reference with proto definitions in `protos/<domain>/v1/`.
+2. Identify the domain and all its entities. Cross-reference with proto definitions in `protos/`. Note: the domain name may group multiple proto packages (e.g., `collaboration` domain covers `space.v1` and `content.v1` protos).
 
 3. Check every item below. For each, report **PASS** or **FAIL** with a brief explanation.
 
 ## Checklist
 
-### SQL Migration — `sql/migrations/<NNN>_create_<domain>.sql`
+### SQL Migration — `sql/migrations/<NNNN>_create_<domain>.sql`
 
 - [ ] Migration creates Postgres schema with `CREATE SCHEMA IF NOT EXISTS <domain>`
 - [ ] All tables are schema-qualified (`<domain>.<entity>`)
 - [ ] Single migration file contains all entity tables for the domain
-- [ ] File has sequential migration number (no gaps, no conflicts with existing)
+- [ ] File has sequential 4-digit migration number (e.g., `0001`, `0002`) with no gaps or conflicts
 - [ ] Has `-- +goose Up` and `-- +goose Down` annotations
 - [ ] Each table has UUID primary key with `DEFAULT gen_random_uuid()`
 - [ ] Each table has `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`

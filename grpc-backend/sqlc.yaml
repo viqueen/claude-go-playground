@@ -1,2 +1,19 @@
 version: "2"
-sql: []
+sql:
+  - engine: "postgresql"
+    queries: "sql/queries/collaboration/"
+    schema: "sql/migrations/"
+    gen:
+      go:
+        package: "collaboration"
+        out: "gen/db/collaboration"
+        sql_package: "pgx/v5"
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/gofrs/uuid/v5"
+              type: "UUID"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"

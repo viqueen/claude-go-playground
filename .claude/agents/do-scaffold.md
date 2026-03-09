@@ -872,7 +872,8 @@ var FS embed.FS
 
 Note: `go:embed *.sql` requires at least one `.sql` file to exist. Create an empty
 placeholder `sql/migrations/.gitkeep` and use `//go:embed` with `all:` prefix if needed,
-or create a `001_init.sql` no-op migration (goose requires version > 0):
+or create a `0001_init.sql` no-op migration (goose requires version > 0, use 4-digit format).
+This stub should be replaced when the first real migration is added by the entity-store agent:
 
 ```sql
 -- +goose Up
@@ -1116,7 +1117,7 @@ If `make vet` fails, read the errors carefully — common issues:
 - Wrong return count: check the actual signature of third-party functions (e.g., `validate.NewInterceptor()` returns 1 value)
 - Missing `go:embed` pattern match: ensure at least one `.sql` file exists for the embed directive
 - River requires at least one worker: add a placeholder worker to the workers bundle
-- Goose migration version must be > 0: use `001_init.sql`, not `000_init.sql`
+- Goose migration version must be > 0: use `0001_init.sql` (4-digit format), not `000_init.sql`
 
 ## Checklist
 
