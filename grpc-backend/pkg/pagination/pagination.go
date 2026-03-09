@@ -20,12 +20,15 @@ func DecodePageToken(pageToken string) (int32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid page token: %w", err)
 	}
+	if offset < 0 {
+		return 0, fmt.Errorf("invalid page token: negative offset")
+	}
 	return int32(offset), nil
 }
 
 // NextPageToken returns the next page token, or empty string if this is the last page.
 func NextPageToken(offset, pageSize int32, resultCount int) string {
-	if int32(resultCount) < pageSize {
+	if pageSize <= 0 || int32(resultCount) < pageSize {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(int64(offset+pageSize), 10)))
