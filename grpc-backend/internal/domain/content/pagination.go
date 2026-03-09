@@ -1,4 +1,4 @@
-package collaboration
+package content
 
 import (
 	"encoding/base64"

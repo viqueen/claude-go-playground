@@ -1,4 +1,4 @@
-package collaboration
+package content
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/outbox"
 )
 
-func (s *service) UpdateContent(ctx context.Context, params db.UpdateContentParams) (*db.CollaborationContent, error) {
+func (s *service) Update(ctx context.Context, params db.UpdateContentParams) (*db.CollaborationContent, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func (s *service) UpdateContent(ctx context.Context, params db.UpdateContentPara
 	content, err := s.queries.WithTx(tx).UpdateContent(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrContentNotFound
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
@@ -38,6 +38,6 @@ func (s *service) UpdateContent(ctx context.Context, params db.UpdateContentPara
 		return nil, err
 	}
 
-	s.contentCache.Set(content.ID, &content, 5*time.Minute)
+	s.cache.Set(content.ID, &content, 5*time.Minute)
 	return &content, nil
 }

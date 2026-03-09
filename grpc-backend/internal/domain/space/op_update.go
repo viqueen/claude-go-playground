@@ -1,29 +1,35 @@
-package collaboration
+package space
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/outbox"
 )
 
-func (s *service) CreateContent(ctx context.Context, params db.CreateContentParams) (*db.CollaborationContent, error) {
+func (s *service) Update(ctx context.Context, params db.UpdateSpaceParams) (*db.CollaborationSpace, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	content, err := s.queries.WithTx(tx).CreateContent(ctx, params)
+	space, err := s.queries.WithTx(tx).UpdateSpace(ctx, params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "content.created",
-		ID:   content.ID.String(),
-		Data: content,
+		Type: "space.updated",
+		ID:   space.ID.String(),
+		Data: space,
 	}); err != nil {
 		return nil, err
 	}
@@ -32,6 +38,6 @@ func (s *service) CreateContent(ctx context.Context, params db.CreateContentPara
 		return nil, err
 	}
 
-	s.contentCache.Set(content.ID, &content, 5*time.Minute)
-	return &content, nil
+	s.cache.Set(space.ID, &space, 5*time.Minute)
+	return &space, nil
 }

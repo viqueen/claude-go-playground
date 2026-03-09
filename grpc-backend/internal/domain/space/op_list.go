@@ -1,4 +1,4 @@
-package collaboration
+package space
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
 )
 
-func (s *service) ListSpaces(ctx context.Context, pageSize int32, pageToken string) ([]db.CollaborationSpace, string, error) {
+func (s *service) List(ctx context.Context, pageSize int32, pageToken string) ([]db.CollaborationSpace, string, error) {
 	offset, err := decodePageToken(pageToken)
 	if err != nil {
 		return nil, "", err

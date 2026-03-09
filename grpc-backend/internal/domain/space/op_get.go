@@ -1,4 +1,4 @@
-package collaboration
+package space
 
 import (
 	"context"
@@ -11,19 +11,19 @@ import (
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
 )
 
-func (s *service) GetSpace(ctx context.Context, id uuid.UUID) (*db.CollaborationSpace, error) {
-	if cached, ok := s.spaceCache.Get(id); ok {
+func (s *service) Get(ctx context.Context, id uuid.UUID) (*db.CollaborationSpace, error) {
+	if cached, ok := s.cache.Get(id); ok {
 		return cached, nil
 	}
 
 	space, err := s.queries.GetSpace(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrSpaceNotFound
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 
-	s.spaceCache.Set(id, &space, 5*time.Minute)
+	s.cache.Set(id, &space, 5*time.Minute)
 	return &space, nil
 }

@@ -1,4 +1,4 @@
-package collaboration
+package content
 
 import (
 	"context"
@@ -8,22 +8,22 @@ import (
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/outbox"
 )
 
-func (s *service) CreateSpace(ctx context.Context, params db.CreateSpaceParams) (*db.CollaborationSpace, error) {
+func (s *service) Create(ctx context.Context, params db.CreateContentParams) (*db.CollaborationContent, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	space, err := s.queries.WithTx(tx).CreateSpace(ctx, params)
+	content, err := s.queries.WithTx(tx).CreateContent(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "space.created",
-		ID:   space.ID.String(),
-		Data: space,
+		Type: "content.created",
+		ID:   content.ID.String(),
+		Data: content,
 	}); err != nil {
 		return nil, err
 	}
@@ -32,6 +32,6 @@ func (s *service) CreateSpace(ctx context.Context, params db.CreateSpaceParams) 
 		return nil, err
 	}
 
-	s.spaceCache.Set(space.ID, &space, 5*time.Minute)
-	return &space, nil
+	s.cache.Set(content.ID, &content, 5*time.Minute)
+	return &content, nil
 }
