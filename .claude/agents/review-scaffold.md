@@ -31,7 +31,9 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 - [ ] `Makefile` `start` runs `go tool air`, `debug` runs `go tool air -c .air.debug.toml`
 - [ ] `go.mod` has `tool` directives for `github.com/air-verse/air` and `github.com/go-delve/delve/cmd/dlv`
 - [ ] `Dockerfile` is multi-stage: generate (buf + sqlc) → build → runtime
+- [ ] `Dockerfile` codegen tool installs use pinned versions (not `@latest`)
 - [ ] `Dockerfile` generate stage copies from `protos/` (not `api/`)
+- [ ] `Dockerfile` buf/sqlc generate steps are conditional (skip when no protos or empty sql list)
 - [ ] `docker-compose.yml` has infra only: postgres, opensearch, opensearch-dashboards (no app services)
 - [ ] `docker-compose.yml` postgres has a healthcheck
 - [ ] `.air.toml` watches `go` and `sql` files, builds `cmd/server`, excludes `gen/` and `tmp/`
@@ -50,9 +52,11 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 - [ ] **(Connect-RPC)** `pkg/connectutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to connect codes
 - [ ] **(Connect-RPC)** `pkg/connectutil/interceptors.go` — `NewInterceptors()` returns recovery + logging + validate
 - [ ] **(gRPC)** `pkg/grpcapp` — `App` interface with `Server()` + `Run()`, native gRPC server, health check, reflection
-- [ ] **(gRPC)** `pkg/grpcutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to gRPC status codes
-- [ ] **(gRPC)** `pkg/grpcutil/interceptors.go` — `NewServerOpts()` returns recovery + logging + validate interceptors
-- [ ] `pkg/cache` — `Cache[K,V]` interface with in-memory implementation
+- [ ] **(Connect-RPC)** `pkg/connectutil/errors.go` — `NewErrorFrom` has nil guard for `err`
+- [ ] **(gRPC)** `pkg/grpcutil/errors.go` — `NewErrorFrom(err, mappings)` maps sentinel errors to gRPC status codes, has nil guard
+- [ ] **(gRPC)** `pkg/grpcutil/interceptors.go` — `NewServerOpts()` returns `([]grpc.ServerOption, error)`, no panics
+- [ ] **(gRPC)** `pkg/grpcapp/app.go` — health sidecar binds listener before goroutine (fail-fast on port conflict)
+- [ ] `pkg/cache` — `Cache[K,V]` interface with in-memory implementation that evicts expired entries on Get
 - [ ] `pkg/outbox` — `Outbox[T]` interface + `Event` struct, no implementation
 - [ ] `pkg/migrate` — goose wrapper with `Run(db, migrations, dir)`
 - [ ] All `pkg/` packages follow interface-first convention: interfaces exported, structs unexported
@@ -61,8 +65,9 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 ### cmd/server/
 
 - [ ] `main.go` — signal context, config load, setup calls, run
-- [ ] `setup_connections.go` — `Connections` struct with `Pool` + `RiverClient`, `Close()` method
+- [ ] `setup_connections.go` — `Connections` struct with `Pool` + `RiverClient`, `Close()` uses fresh shutdown context (not the signal ctx)
 - [ ] `setup_connections.go` — runs both river migrations and goose migrations
+- [ ] `setup_connections.go` — River workers bundle has at least one worker (placeholder)
 - [ ] `setup_domains.go` — empty `Domains` struct, `setupDomains()` returns it
 - [ ] **(Connect-RPC)** `setup_gateway.go` — creates `connectapp.App`, no handlers registered yet
 - [ ] **(gRPC)** `setup_gateway.go` — creates `grpcapp.App` with `grpcutil.NewServerOpts()`, no services registered yet
@@ -70,11 +75,17 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 ### sql/migrations/
 
 - [ ] `migrations.go` with `//go:embed` directive
-- [ ] At least one `.sql` file (placeholder) so the embed directive resolves
+- [ ] At least one `.sql` file (placeholder, version > 0) so the embed directive resolves
 
 ### internal/
 
 - [ ] Placeholder directories exist: `internal/api/`, `internal/domain/`, `internal/outbox/`
+
+### Robustness
+
+- [ ] No panics in `pkg/` — exported helpers return errors, callers handle them at the boundary
+- [ ] Exported functions that accept pointer/interface params have nil guards where a nil would cause a panic
+- [ ] Goroutines that start listeners bind/listen before spawning, so errors surface synchronously
 
 ### No business logic
 

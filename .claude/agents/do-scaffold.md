@@ -220,29 +220,28 @@ The generate stage installs the protoc plugin matching the project's framework.
 
 ```dockerfile
 # Stage 1: Generate proto + sqlc code
-FROM golang:1.24-alpine AS generate
+FROM golang:1.25-alpine AS generate
 
 RUN apk add --no-cache git
-RUN go install github.com/bufbuild/buf/cmd/buf@latest
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+RUN go install github.com/bufbuild/buf/cmd/buf@v1.66.0
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.6
+RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.19.1
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
 
 WORKDIR /build
 
-# buf generate
+# buf generate (skip if no .proto files)
 COPY buf.gen.yaml ./
 COPY protos/ protos/
-RUN buf dep update protos/
-RUN buf generate protos/
+RUN find protos/ -name '*.proto' | grep -q . && buf dep update protos/ && buf generate protos/ || mkdir -p gen/sdk
 
 # sqlc generate
 COPY sqlc.yaml ./
 COPY sql ./sql
-RUN sqlc generate
+RUN grep -q 'sql: \[\]' sqlc.yaml && mkdir -p gen/db || sqlc generate
 
 # Stage 2: Build
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 COPY . .
@@ -264,29 +263,28 @@ CMD ["/server"]
 
 ```dockerfile
 # Stage 1: Generate proto + sqlc code
-FROM golang:1.24-alpine AS generate
+FROM golang:1.25-alpine AS generate
 
 RUN apk add --no-cache git
-RUN go install github.com/bufbuild/buf/cmd/buf@latest
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+RUN go install github.com/bufbuild/buf/cmd/buf@v1.66.0
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.6
+RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
 
 WORKDIR /build
 
-# buf generate
+# buf generate (skip if no .proto files)
 COPY buf.gen.yaml ./
 COPY protos/ protos/
-RUN buf dep update protos/
-RUN buf generate protos/
+RUN find protos/ -name '*.proto' | grep -q . && buf dep update protos/ && buf generate protos/ || mkdir -p gen/sdk
 
 # sqlc generate
 COPY sqlc.yaml ./
 COPY sql ./sql
-RUN sqlc generate
+RUN grep -q 'sql: \[\]' sqlc.yaml && mkdir -p gen/db || sqlc generate
 
 # Stage 2: Build
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 COPY . .
@@ -534,8 +532,16 @@ func (a *app) Run(ctx context.Context) error {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"up"}`))
 	})
-	healthServer := &http.Server{Addr: a.healthAddr, Handler: healthMux}
-	go func() { _ = healthServer.ListenAndServe() }()
+	healthServer := &http.Server{Handler: healthMux}
+	healthLis, err := net.Listen("tcp", a.healthAddr)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if err := healthServer.Serve(healthLis); err != nil && err != http.ErrServerClosed {
+			log.Error().Err(err).Msg("health server error")
+		}
+	}()
 
 	log.Info().Str("addr", a.addr).Str("health_addr", a.healthAddr).Msg("server started")
 
@@ -567,6 +573,9 @@ import (
 )
 
 func NewErrorFrom(err error, mappings map[error]connect.Code) *connect.Error {
+	if err == nil {
+		return nil
+	}
 	for sentinel, code := range mappings {
 		if errors.Is(err, sentinel) {
 			return connect.NewError(code, err)
@@ -649,6 +658,9 @@ import (
 )
 
 func NewErrorFrom(err error, mappings map[error]codes.Code) error {
+	if err == nil {
+		return nil
+	}
 	for sentinel, code := range mappings {
 		if errors.Is(err, sentinel) {
 			return status.Error(code, err.Error())
@@ -670,26 +682,26 @@ import (
 	"fmt"
 	"time"
 
+	"buf.build/go/protovalidate"
+	protovalidate_middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	protovalidate_middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
 )
 
-func NewServerOpts() []grpc.ServerOption {
-	validateInterceptor, err := protovalidate_middleware.NewUnaryServerInterceptor()
+func NewServerOpts() ([]grpc.ServerOption, error) {
+	validator, err := protovalidate.New()
 	if err != nil {
-		panic(fmt.Sprintf("failed to create protovalidate interceptor: %v", err))
+		return nil, fmt.Errorf("failed to create protovalidate validator: %w", err)
 	}
 	return []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(),
 			LoggingInterceptor(),
-			validateInterceptor,
+			protovalidate_middleware.UnaryServerInterceptor(validator),
 		),
-	}
+	}, nil
 }
 
 func RecoveryInterceptor() grpc.UnaryServerInterceptor {
@@ -756,13 +768,25 @@ type entry[V any] struct {
 
 func (c *inMemory[K, V]) Get(key K) (V, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	e, ok := c.items[key]
-	if !ok || (!e.expiresAt.IsZero() && time.Now().After(e.expiresAt)) {
+	if !ok {
+		c.mu.RUnlock()
 		var zero V
 		return zero, false
 	}
-	return e.value, true
+	if !e.expiresAt.IsZero() && time.Now().After(e.expiresAt) {
+		c.mu.RUnlock()
+		c.mu.Lock()
+		if e2, ok2 := c.items[key]; ok2 && !e2.expiresAt.IsZero() && time.Now().After(e2.expiresAt) {
+			delete(c.items, key)
+		}
+		c.mu.Unlock()
+		var zero V
+		return zero, false
+	}
+	value := e.value
+	c.mu.RUnlock()
+	return value, true
 }
 
 func (c *inMemory[K, V]) Set(key K, value V, ttl time.Duration) {
@@ -848,7 +872,7 @@ var FS embed.FS
 
 Note: `go:embed *.sql` requires at least one `.sql` file to exist. Create an empty
 placeholder `sql/migrations/.gitkeep` and use `//go:embed` with `all:` prefix if needed,
-or create a `000_init.sql` no-op migration:
+or create a `001_init.sql` no-op migration (goose requires version > 0):
 
 ```sql
 -- +goose Up
@@ -886,7 +910,7 @@ func main() {
 	}
 
 	connections := setupConnections(ctx, cfg)
-	defer connections.Close(ctx)
+	defer connections.Close()
 
 	domains := setupDomains(connections)
 	application := setupGateway(cfg, domains)
@@ -909,6 +933,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -929,8 +954,10 @@ type Connections struct {
 	RiverClient *river.Client[pgx.Tx]
 }
 
-func (c *Connections) Close(ctx context.Context) {
-	if err := c.RiverClient.Stop(ctx); err != nil {
+func (c *Connections) Close() {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.RiverClient.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("failed to stop river client")
 	}
 	c.Pool.Close()
@@ -963,6 +990,7 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 
 	// River client — no workers registered yet, domains add them via the integrate agent
 	workers := river.NewWorkers()
+	river.AddWorker(workers, &placeholderWorker{})
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 100}},
@@ -976,6 +1004,20 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	}
 
 	return &Connections{Pool: pool, RiverClient: riverClient}
+}
+
+// placeholderWorker satisfies River's requirement of at least one worker.
+// Domains add real workers via the integrate agent.
+type placeholderArgs struct{}
+
+func (placeholderArgs) Kind() string { return "placeholder" }
+
+type placeholderWorker struct {
+	river.WorkerDefaults[placeholderArgs]
+}
+
+func (w *placeholderWorker) Work(_ context.Context, _ *river.Job[placeholderArgs]) error {
+	return nil
 }
 ```
 
@@ -1025,15 +1067,21 @@ func setupGateway(cfg *config.Config, _ *Domains) connectapp.App {
 package main
 
 import (
+	"github.com/rs/zerolog/log"
 	"<module>/pkg/config"
 	"<module>/pkg/grpcapp"
 	"<module>/pkg/grpcutil"
 )
 
 func setupGateway(cfg *config.Config, _ *Domains) grpcapp.App {
+	serverOpts, err := grpcutil.NewServerOpts()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create server options")
+	}
+
 	application := grpcapp.New(
 		grpcapp.WithAddr(cfg.ServerAddr),
-		grpcapp.WithServerOpts(grpcutil.NewServerOpts()...),
+		grpcapp.WithServerOpts(serverOpts...),
 	)
 
 	// Services are registered here by the integrate agent.
@@ -1067,13 +1115,15 @@ If `make vet` fails, read the errors carefully — common issues:
 - Unused imports: remove them (only import packages directly referenced in the file)
 - Wrong return count: check the actual signature of third-party functions (e.g., `validate.NewInterceptor()` returns 1 value)
 - Missing `go:embed` pattern match: ensure at least one `.sql` file exists for the embed directive
+- River requires at least one worker: add a placeholder worker to the workers bundle
+- Goose migration version must be > 0: use `001_init.sql`, not `000_init.sql`
 
 ## Checklist
 
 - [ ] `.gitignore` covers `gen/`, `.env`, `tmp/`
 - [ ] `go.mod` with correct module path
 - [ ] `Makefile` with targets: `codegen`, `tidy`, `vet`, `build`, `test`, `infra`, `start`, `debug`, `teardown`, `clean`
-- [ ] `Dockerfile` multi-stage build (generate → build → runtime)
+- [ ] `Dockerfile` multi-stage build (generate → build → runtime) with pinned tool versions (not `@latest`)
 - [ ] `docker-compose.yml` with infra only: postgres, opensearch, opensearch-dashboards (no app services)
 - [ ] `.air.toml` — live-reload config for `cmd/server`
 - [ ] `.air.debug.toml` — debug config with delve on port 2345
