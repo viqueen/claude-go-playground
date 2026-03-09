@@ -37,7 +37,8 @@ Three files per domain:
 - [ ] Resource message has `id` (string), `created_at`, `updated_at` fields
 - [ ] Time fields use `google.protobuf.Timestamp` (not strings)
 - [ ] Enums have `_UNSPECIFIED = 0` as zero value
-- [ ] No `buf/validate` import here (validation lives in service + refs)
+- [ ] Imports `buf/validate/validate.proto` — model fields MUST have validation annotations (enforced via FieldMask updates)
+- [ ] Cross-domain relationships use Ref types (e.g., `space.v1.SpaceRef`), not plain string IDs
 
 #### `<domain>_refs.proto` — Typed ID References (cross-package use)
 - [ ] `Ref` message exists with `id` field
@@ -50,12 +51,15 @@ Three files per domain:
 - [ ] Create request: string fields have length validation (`min_len`, `max_len`)
 - [ ] Create request: enum fields exclude unspecified (`{defined_only: true, not_in: [0]}`)
 - [ ] Get/Delete request: ID validated as UUID
-- [ ] List request: `page_size` with range validation (`{gte: 1, lte: 100}`) + `page_token`
+- [ ] List request: `page_size` with range validation (`{gte: 0, lte: 100}`) + `page_token` — `0` means server default (AIP-158)
 - [ ] List response: `items` (repeated, always named `items`) + `next_page_token`
 - [ ] Response messages wrap entity in a named field (e.g., `Content content = 1`)
 - [ ] Within same package, requests use plain `string id` (not Ref types)
 - [ ] Update request: uses `google.protobuf.FieldMask` with `[(buf.validate.field).required = true]`
+- [ ] Update request: embeds full model message (not a separate payload) — FieldMask gates applied fields
 - [ ] Update request: resource field is required
+- [ ] Delete RPC returns `google.protobuf.Empty` (not a response with `bool success`)
+- [ ] Cross-domain refs only on Create requests (Get/List/Update/Delete operate by ID alone)
 - [ ] No business logic or computed fields in request messages
 
 ### buf.yaml — `protos/buf.yaml`
