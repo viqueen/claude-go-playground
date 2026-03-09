@@ -1,0 +1,61 @@
+name: grpc-backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "grpc-backend/**"
+      - ".github/workflows/grpc-backend.yml"
+  pull_request:
+    paths:
+      - "grpc-backend/**"
+      - ".github/workflows/grpc-backend.yml"
+
+defaults:
+  run:
+    working-directory: grpc-backend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: grpc-backend/go.mod
+          cache-dependency-path: grpc-backend/go.sum
+
+      - name: Codegen
+        run: make codegen
+
+      - name: Tidy
+        run: go mod tidy
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: docker build .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: grpc-backend/go.mod
+          cache-dependency-path: grpc-backend/go.sum
+
+      - name: Codegen
+        run: make codegen
+
+      - name: Tidy
+        run: go mod tidy
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -timeout 5m ./...
