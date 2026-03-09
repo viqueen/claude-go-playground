@@ -4,7 +4,7 @@ SELECT * FROM collaboration.space WHERE id = sqlc.arg('id') AND deleted_at IS NU
 -- name: ListSpaces :many
 SELECT * FROM collaboration.space
 WHERE deleted_at IS NULL
-ORDER BY created_at LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+ORDER BY created_at, id LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountSpaces :one
 SELECT count(*) FROM collaboration.space WHERE deleted_at IS NULL;
