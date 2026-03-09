@@ -1,4 +1,4 @@
-package content
+package pagination
 
 import (
 	"encoding/base64"
@@ -6,7 +6,9 @@ import (
 	"strconv"
 )
 
-func decodePageToken(pageToken string) (int32, error) {
+// DecodePageToken decodes a base64-encoded offset page token.
+// An empty token returns offset 0.
+func DecodePageToken(pageToken string) (int32, error) {
 	if pageToken == "" {
 		return 0, nil
 	}
@@ -21,13 +23,10 @@ func decodePageToken(pageToken string) (int32, error) {
 	return int32(offset), nil
 }
 
-func encodePageToken(offset int32) string {
-	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(int64(offset), 10)))
-}
-
-func nextPageToken(offset, pageSize int32, resultCount int) string {
+// NextPageToken returns the next page token, or empty string if this is the last page.
+func NextPageToken(offset, pageSize int32, resultCount int) string {
 	if int32(resultCount) < pageSize {
 		return ""
 	}
-	return encodePageToken(offset + pageSize)
+	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(int64(offset+pageSize), 10)))
 }
