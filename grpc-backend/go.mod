@@ -12,6 +12,7 @@ require (
 	buf.build/go/protovalidate v0.12.0
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3
+	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/pressly/goose/v3 v3.27.0

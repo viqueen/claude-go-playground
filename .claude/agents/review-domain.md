@@ -87,7 +87,7 @@ For each read `op_*.go`, verify the cache-first pattern:
 - [ ] All sentinel errors defined in `errors.go` using `errors.New()`
 - [ ] `ErrNotFound` exists
 - [ ] `ErrAlreadyExists` exists (if SQL schema has unique constraints) — check the migration for unique indexes
-- [ ] Create operation maps postgres `23505` (unique_violation) via `pgconn.PgError` to `ErrAlreadyExists`
+- [ ] Create operation maps `pgerrcode.UniqueViolation` via `pgconn.PgError` to `ErrAlreadyExists` — no hardcoded postgres error codes
 - [ ] No error wrapping that would break `errors.Is()` matching
 - [ ] No generic error returns where a sentinel would be appropriate
 

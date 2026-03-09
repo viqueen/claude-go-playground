@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
@@ -21,7 +22,7 @@ func (s *service) Create(ctx context.Context, params db.CreateSpaceParams) (*db.
 	space, err := s.queries.WithTx(tx).CreateSpace(ctx, params)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
 			return nil, ErrAlreadyExists
 		}
 		return nil, err

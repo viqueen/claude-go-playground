@@ -65,7 +65,7 @@ func New(deps Dependencies) Service {
 Each write operation:
 - Opens a transaction
 - Executes the sqlc query within the transaction
-- Maps postgres `23505` (unique_violation) to `ErrAlreadyExists` when the SQL schema has unique constraints
+- Maps `pgerrcode.UniqueViolation` to `ErrAlreadyExists` when the SQL schema has unique constraints (use `github.com/jackc/pgerrcode` — never hardcode postgres error codes)
 - Emits outbox events within the transaction
 - Commits
 - Updates cache after commit
@@ -106,7 +106,7 @@ Each read operation:
 - [ ] `service.go` with interface, Dependencies, constructor
 - [ ] One `op_*.go` per operation
 - [ ] All writes use transaction + outbox + cache pattern
-- [ ] Create maps postgres `23505` → `ErrAlreadyExists` when unique constraints exist
+- [ ] Create maps `pgerrcode.UniqueViolation` → `ErrAlreadyExists` when unique constraints exist
 - [ ] Cascade deletes emit outbox events for affected related entities
 - [ ] All reads check cache first
 - [ ] List operations use `pkg/pagination` (not local helpers)
