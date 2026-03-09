@@ -33,12 +33,12 @@ func (s *service) Delete(ctx context.Context, id uuid.UUID) error {
 
 	if err := s.outbox.Emit(ctx, tx,
 		outbox.Event{
-			Type: "space.content_deleted",
+			Type: EventContentDeleted,
 			ID:   id.String(),
 			Data: map[string]string{"space_id": id.String()},
 		},
 		outbox.Event{
-			Type: "space.deleted",
+			Type: EventDeleted,
 			ID:   space.ID.String(),
 			Data: space,
 		},

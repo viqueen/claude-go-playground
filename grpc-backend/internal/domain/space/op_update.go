@@ -27,7 +27,7 @@ func (s *service) Update(ctx context.Context, params db.UpdateSpaceParams) (*db.
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "space.updated",
+		Type: EventUpdated,
 		ID:   space.ID.String(),
 		Data: space,
 	}); err != nil {

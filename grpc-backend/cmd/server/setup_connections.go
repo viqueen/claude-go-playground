@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	spaceevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/config"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/migrate"
 	migrations "github.com/viqueen/claude-go-playground/grpc-backend/sql/migrations"
@@ -58,9 +59,10 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	}
 	stdDB.Close()
 
-	// River client — no workers registered yet, domains add them via the integrate agent
+	// River client with domain workers
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &placeholderWorker{})
+	river.AddWorker(workers, &spaceevents.IndexWorker{})
+	river.AddWorker(workers, &spaceevents.AuditWorker{})
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 100}},
@@ -74,18 +76,4 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	}
 
 	return &Connections{Pool: pool, RiverClient: riverClient}
-}
-
-// placeholderWorker satisfies River's requirement of at least one worker.
-// Domains add real workers via the integrate agent.
-type placeholderArgs struct{}
-
-func (placeholderArgs) Kind() string { return "placeholder" }
-
-type placeholderWorker struct {
-	river.WorkerDefaults[placeholderArgs]
-}
-
-func (w *placeholderWorker) Work(_ context.Context, _ *river.Job[placeholderArgs]) error {
-	return nil
 }
