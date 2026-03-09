@@ -33,23 +33,10 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### File Structure
 
-- [ ] `service_test.go` contains **only** setup (no `Test*` functions)
-- [ ] One `op_<operation>_test.go` per domain operation
+- [ ] No `service_test.go` or `op_*_test.go` files (domain tests are redundant — API integration tests cover the full stack)
 - [ ] `handler_test.go` contains **only** setup (no `Test*` functions)
 - [ ] One `route_<rpc>_test.go` per API route
 - [ ] Outbox tests in `event_<concern>_test.go`
-
-### Domain Tests — `internal/domain/<domain>/`
-
-- [ ] `service_test.go` has `setupService(t)` returning the service + context
-- [ ] Uses `testkit.SetupPostgres()` for a real database (no mocks)
-- [ ] Uses a no-op outbox implementation to isolate from river
-- [ ] Each `op_*_test.go` has a single parent test function (e.g., `TestCreate`)
-- [ ] Tests cover all operations: create, get, list, update, soft delete
-- [ ] Error cases are **business logic only** (no invalid argument — that's the API layer):
-  - [ ] Get non-existent resource → `ErrNotFound`
-  - [ ] Delete non-existent resource → `ErrNotFound`
-  - [ ] Create duplicate (if applicable) → `ErrAlreadyExists`
 
 ### API Tests — `internal/api/<domain>/v1/`
 
@@ -85,10 +72,8 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 ### Test Case Ordering
 
-- [ ] API `_Errors`: unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin ops)
-- [ ] API `_Success`: not found → already exists → success cases (one or more)
-- [ ] Domain layer ordering: not found → already exists → precondition failed → success
-- [ ] Domain tests do NOT test invalid argument (that's the API/interceptor layer)
+- [ ] `_Errors`: unauthenticated (anonymous) → invalid argument (standard) → permission denied (standard on admin ops)
+- [ ] `_Success`: not found → already exists → success cases (one or more)
 
 ### Test Naming
 
@@ -109,10 +94,14 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 
 - [ ] No table-driven tests (`[]struct{ name string; ... }`)
 - [ ] No mocks for databases — testcontainers only (when DB is needed)
-- [ ] No `Test*` functions in setup files (`service_test.go`, `handler_test.go`)
+- [ ] No `Test*` functions in setup files (`handler_test.go`)
+- [ ] No `service_test.go` or `op_*_test.go` files (domain tests are redundant)
 - [ ] No shared state between parent tests
 - [ ] No testcontainers in `_Errors` tests (interceptor-only, must use `setupHandler`)
 - [ ] No missing `t.Parallel()` in route subtests
+- [ ] No empty-state assertions in parallel subtests sharing a database (siblings may insert rows concurrently)
+- [ ] Update test proto messages populate all validated required fields (protovalidate validates entire nested messages, even for partial updates)
+- [ ] List queries use deterministic `ORDER BY` with a tiebreaker column (e.g., `created_at, id`)
 
 ## Output format
 
@@ -125,20 +114,17 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 ### File Structure
 | Expected File | Present | Setup Only | Status |
 |---------------|---------|------------|--------|
-| service_test.go | yes | yes | PASS |
-| op_create_test.go | yes | — | PASS |
 | handler_test.go | yes | yes | PASS |
 | route_create_content_test.go | yes | — | PASS |
+| route_delete_content_test.go | yes | — | PASS |
 | ... | ... | ... | ... |
 
 ### Coverage Matrix
-| Layer | Operation | _Errors (no DB) | _Success (with DB) | t.Parallel | Status |
-|-------|-----------|----------------|-------------------|------------|--------|
-| Domain | Create | — | already exists, success | — | PASS |
-| Domain | Get | — | not found, success | — | PASS |
-| API | CreateContent | unauth, invalid arg | success (x2) | yes | PASS |
-| API | DeleteContent | unauth, perm denied | not found, success | yes | PASS |
-| ... | ... | ... | ... | ... | ... |
+| Operation | _Errors (no DB) | _Success (with DB) | t.Parallel | Status |
+|-----------|----------------|-------------------|------------|--------|
+| CreateContent | unauth, invalid arg | success (x2) | yes | PASS |
+| DeleteContent | unauth, perm denied | not found, success | yes | PASS |
+| ... | ... | ... | ... | ... |
 
 ### Assertion Usage
 | File | require (setup) | assert (checks) | Status |
