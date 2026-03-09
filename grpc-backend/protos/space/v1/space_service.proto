@@ -3,6 +3,7 @@ syntax = "proto3";
 package space.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "space/v1/space_model.proto";
 
@@ -13,7 +14,7 @@ service SpaceService {
   rpc GetSpace(GetSpaceRequest) returns (GetSpaceResponse);
   rpc ListSpaces(ListSpacesRequest) returns (ListSpacesResponse);
   rpc UpdateSpace(UpdateSpaceRequest) returns (UpdateSpaceResponse);
-  rpc DeleteSpace(DeleteSpaceRequest) returns (DeleteSpaceResponse);
+  rpc DeleteSpace(DeleteSpaceRequest) returns (google.protobuf.Empty);
 }
 
 // Create — status defaults to DRAFT
@@ -42,7 +43,7 @@ message GetSpaceResponse {
 // List
 
 message ListSpacesRequest {
-  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
   string page_token = 2;
 }
 
@@ -69,6 +70,3 @@ message DeleteSpaceRequest {
   string id = 1 [(buf.validate.field).string.uuid = true];
 }
 
-message DeleteSpaceResponse {
-  bool success = 1;
-}
