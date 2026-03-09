@@ -60,6 +60,7 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 
 - [ ] `toProto()` maps sqlc model → proto response message
 - [ ] `fromProtoCreate()` maps proto create request → sqlc create params
+- [ ] `validateUpdateMask()` rejects empty masks and unsupported field paths
 - [ ] `fromProtoUpdate()` maps proto update request → sqlc update params
 - [ ] Update mapper uses `pgtype.Text{String: val, Valid: true}` for nullable strings (not `*string`)
 - [ ] Update mapper uses `pgtype.Int4{Int32: val, Valid: true}` for nullable ints (not `*int32`)
@@ -69,17 +70,21 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 
 - [ ] Each `route_*.go` contains exactly one handler method
 - [ ] Route methods call domain service (not sqlc directly)
-- [ ] **(Connect-RPC)** Route methods use `connectutil.NewErrorFrom(err, errorMappings)` for error mapping
-- [ ] **(gRPC)** Route methods use `grpcutil.NewErrorFrom(err, errorMappings)` for error mapping
+- [ ] **(Connect-RPC)** Route methods use `connectutil.NewErrorFrom(err, errorMappings)` for domain errors
+- [ ] **(gRPC)** Route methods use `grpcutil.NewErrorFrom(err, errorMappings)` for domain errors
+- [ ] UUID parse errors return `InvalidArgument` directly (not via errorMappings which falls through to Internal)
+- [ ] Update route rejects mismatched resource id vs request id with `InvalidArgument`
+- [ ] Update route calls `validateUpdateMask()` before `fromProtoUpdate()`
 - [ ] Route methods use mapper functions for proto ↔ sqlc conversion
 - [ ] Every RPC in the proto service has a corresponding route file
 
 ### Outbox — `internal/outbox/`
 
 - [ ] `river.go` exists with `NewRiverOutbox` constructor returning `outbox.Outbox[pgx.Tx]`
-- [ ] Import alias `<domain>events` for domain event workers (e.g., `contentevents`)
-- [ ] `mapEvent()` has cases for all event types emitted by the domain (created, updated, deleted)
-- [ ] Each event type fans out to the correct workers (index, audit, etc.)
+- [ ] Import alias `<domain>domain` for event constants, `<domain>events` for workers
+- [ ] `mapEvent()` uses shared constants from `<domain>domain.Event*` (no hardcoded strings)
+- [ ] `mapEvent()` has cases for all event types emitted by the domain (created, updated, deleted, etc.)
+- [ ] Every event type fans out to the audit worker (all operations are auditable)
 - [ ] No unhandled event types (default case returns an error)
 
 ### Outbox Workers — `internal/outbox/<domain>/`
@@ -87,6 +92,7 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 - [ ] One `event_<concern>.go` per concern (index, audit, etc.)
 - [ ] Each file has `JobArgs` struct with `Kind()` method
 - [ ] Each file has `Worker` struct embedding `river.WorkerDefaults`
+- [ ] Workers accept `ctx context.Context` (not `_`) and use `log.Ctx(ctx)` for logging
 - [ ] `NewXxxArgs()` constructor maps from `outbox.Event`
 - [ ] Job `Kind()` follows `<domain>.<concern>` naming
 
@@ -103,7 +109,8 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 ### Layer Rules — Imports
 
 - [ ] `internal/api/<domain>/v1/` imports: `internal/domain/<domain>`, `gen/sdk/`, `gen/db/`, `pkg/connectutil` or `pkg/grpcutil` — ALLOWED
-- [ ] `internal/outbox/<domain>/` imports: `gen/db/`, `pkg/outbox`, river — ALLOWED
+- [ ] `internal/outbox/river.go` imports `internal/domain/<domain>` for event constants only — ALLOWED
+- [ ] `internal/outbox/<domain>/` imports: `pkg/outbox`, river — ALLOWED
 - [ ] `internal/outbox/<domain>/` does NOT import `internal/domain/` or `internal/api/`
 - [ ] `internal/api/<domain>/v1/` does NOT import `internal/outbox/`
 

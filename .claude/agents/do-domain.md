@@ -33,7 +33,22 @@ var (
 )
 ```
 
-### 2. `internal/domain/<domain>/service.go`
+### 2. `internal/domain/<domain>/events.go`
+
+Event type constants for outbox events. These are shared between the domain ops and the outbox `mapEvent` — never hardcode event type strings.
+
+```go
+package <domain>
+
+const (
+    EventCreated = "<domain>.created"
+    EventUpdated = "<domain>.updated"
+    EventDeleted = "<domain>.deleted"
+    // ... additional events for cascade side-effects
+)
+```
+
+### 3. `internal/domain/<domain>/service.go`
 
 Service interface + private struct + constructor:
 
@@ -60,7 +75,7 @@ func New(deps Dependencies) Service {
 }
 ```
 
-### 3. `internal/domain/<domain>/op_<operation>.go` — One file per operation
+### 4. `internal/domain/<domain>/op_<operation>.go` — One file per operation
 
 Each write operation:
 - Opens a transaction
@@ -85,6 +100,7 @@ Each read operation:
 - **Dependencies struct**: exported, used only in constructor signature
 - **Private struct inlines fields**: does NOT embed `Dependencies`
 - **File per operation**: `op_create.go`, `op_get.go`, `op_list.go`, `op_update.go`, `op_delete.go`
+- **Event type constants**: define in `events.go`, use in ops — never hardcode event type strings
 - **Transactional outbox**: events emitted inside the DB transaction, before commit
 - **Cache after commit**: only update cache after successful commit
 - **No store abstraction**: sqlc IS the store — `Queries` used directly
@@ -103,8 +119,10 @@ Each read operation:
 ## Checklist
 
 - [ ] `errors.go` with domain-specific sentinel errors
+- [ ] `events.go` with event type constants (`Event*`) — used by ops and outbox
 - [ ] `service.go` with interface, Dependencies, constructor
 - [ ] One `op_*.go` per operation
+- [ ] Outbox events use constants from `events.go` (not hardcoded strings)
 - [ ] All writes use transaction + outbox + cache pattern
 - [ ] Create maps `pgerrcode.UniqueViolation` → `ErrAlreadyExists` when unique constraints exist
 - [ ] Cascade deletes emit outbox events for affected related entities

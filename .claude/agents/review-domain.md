@@ -28,9 +28,10 @@ Identify which project from the PR file paths.
 ### File Structure — `internal/domain/<domain>/`
 
 - [ ] `errors.go` exists with domain-specific sentinel errors
+- [ ] `events.go` exists with event type constants (`Event*`) for all outbox events
 - [ ] `service.go` exists with `Service` interface, `Dependencies` struct, and `New()` constructor
 - [ ] One `op_<operation>.go` file per operation (create, get, list, update, delete)
-- [ ] No extra files beyond errors, service, and op_ files
+- [ ] No extra files beyond errors, events, service, and op_ files
 
 ### Interface-First Convention
 
@@ -93,6 +94,8 @@ For each read `op_*.go`, verify the cache-first pattern:
 
 ### Outbox Events
 
+- [ ] Event types defined as constants in `events.go` (e.g., `EventCreated = "<domain>.created"`)
+- [ ] Ops use constants from `events.go` — no hardcoded event type strings
 - [ ] Event types follow `<domain>.<action>` naming (e.g., `content.created`)
 - [ ] Event ID is the resource ID as string
 - [ ] Events emitted for: create, update, delete

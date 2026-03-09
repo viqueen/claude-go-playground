@@ -121,9 +121,15 @@ Mapping functions between proto types and sqlc models:
 
 - `toProto(model) *proto.Resource` — sqlc model → proto response
 - `fromProtoCreate(msg) sqlcparams` — proto create request → sqlc create params
+- `validateUpdateMask(paths) error` — validates update_mask paths are non-empty and supported
 - `fromProtoUpdate(msg) sqlcparams` — proto update request → sqlc update params
   - Uses `pgtype.Text{String: val, Valid: true}` for nullable string fields from `sqlc.narg()`
   - Uses `pgtype.Int4{Int32: val, Valid: true}` for nullable int fields
+
+The `validateUpdateMask` function must:
+- Reject empty `paths` with an error
+- Reject unsupported field paths with an error
+- Define a `supportedUpdatePaths` map as package-level var listing all valid paths
 
 ### 3. `internal/api/<domain>/v1/route_<rpc>.go` — One file per RPC
 
@@ -166,6 +172,13 @@ func (h *handler) Create<Resource>(
 Key differences: gRPC handlers take proto messages directly (no `connect.Request` wrapper)
 and return proto messages directly (no `connect.Response` wrapper).
 
+#### Route Error Handling Rules
+
+- **UUID parsing errors**: return `codes.InvalidArgument` (or `connect.CodeInvalidArgument`) directly via `status.Errorf` — do NOT pass through `errorMappings` (which would fall through to `codes.Internal`)
+- **Update id mismatch**: if the request has both a top-level `id` and a nested resource `id` (e.g., `req.id` and `req.space.id`), reject with `InvalidArgument` when they differ
+- **Update mask validation**: call `validateUpdateMask()` before `fromProtoUpdate()` — reject empty or unsupported paths with `InvalidArgument`
+- **Domain errors**: use `grpcutil.NewErrorFrom(err, errorMappings)` or `connectutil.NewErrorFrom(err, errorMappings)` for errors from the service layer
+
 ### 4. `internal/outbox/river.go` — Update event mapping
 
 If this is the first domain, create `internal/outbox/river.go` with the `NewRiverOutbox` constructor
@@ -181,6 +194,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
+	contentdomain "<module>/internal/domain/content"
 	contentevents "<module>/internal/outbox/content"
 	"<module>/pkg/outbox"
 )
@@ -211,16 +225,17 @@ func (o *riverOutbox) Emit(ctx context.Context, tx pgx.Tx, events ...outbox.Even
 // mapEvent fans out a domain event into one or more river jobs.
 func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 	switch event.Type {
-	case "content.created":
+	case contentdomain.EventCreated:
 		return []river.JobArgs{
 			contentevents.NewIndexArgs(event),
 			contentevents.NewAuditArgs(event),
 		}, nil
-	case "content.updated":
+	case contentdomain.EventUpdated:
 		return []river.JobArgs{
 			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
 		}, nil
-	case "content.deleted":
+	case contentdomain.EventDeleted:
 		return []river.JobArgs{
 			contentevents.NewIndexArgs(event),
 			contentevents.NewAuditArgs(event),
@@ -231,7 +246,12 @@ func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 }
 ```
 
-Import alias convention for outbox event packages:
+**Key rules:**
+- **Shared constants**: use `<domain>domain.Event*` constants from `internal/domain/<domain>/events.go` — never hardcode event type strings
+- **Audit all events**: every event type must fan out to the audit worker (all operations are auditable)
+
+Import alias conventions for outbox:
+- `<domain>domain` for event constants: `contentdomain "<module>/internal/domain/content"`
 - `<domain>events` for domain event workers: `contentevents "<module>/internal/outbox/content"`
 
 ### 5. `internal/outbox/<domain>/event_<concern>.go` — One file per concern
@@ -241,6 +261,8 @@ Each file contains river `JobArgs` + `Worker` for a specific concern:
 - `event_index.go` — indexing concern
 - `event_audit.go` — auditing concern
 - Add more as needed (analytics, graph, etc.)
+
+Workers must accept `ctx context.Context` (not `_`) and use `log.Ctx(ctx)` for context-aware logging, even if the current implementation is a stub.
 
 ### 6. `cmd/server/` — Wiring updates
 
@@ -265,7 +287,8 @@ Update the setup files to register the new domain:
 ## Layer Rules
 
 - `internal/api/` can depend on: `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/connectutil` or `pkg/grpcutil`
-- `internal/outbox/` can depend on: `gen/db/`, `pkg/outbox`, river
+- `internal/outbox/river.go` can depend on: `internal/domain/` (for event constants only), `internal/outbox/<domain>/`, `pkg/outbox`, river
+- `internal/outbox/<domain>/` can depend on: `pkg/outbox`, river — must NOT import `internal/domain/` or `internal/api/`
 - `cmd/` wires everything together
 
 ## Post-Generation
@@ -280,10 +303,13 @@ Update the setup files to register the new domain:
 - [ ] Go package name is `api<domain><version>` (e.g., `apicontentv1`)
 - [ ] Import aliases follow convention: `<domain>v1`, `<domain>v1connect`, `db<domain>`, `<domain>domain`, `<domain>events`
 - [ ] `handler.go` with Dependencies, constructor, error mappings
-- [ ] `mapper.go` with toProto + fromProtoCreate + fromProtoUpdate
+- [ ] `mapper.go` with toProto + fromProtoCreate + validateUpdateMask + fromProtoUpdate
 - [ ] One `route_*.go` per RPC method
-- [ ] `internal/outbox/river.go` updated with new event types
-- [ ] One `event_*.go` per outbox concern
+- [ ] UUID parse errors return `InvalidArgument` directly (not via errorMappings)
+- [ ] Update route validates id mismatch and update_mask before calling service
+- [ ] `internal/outbox/river.go` updated with new event types using domain constants
+- [ ] All event types fan out to audit worker (audit all operations)
+- [ ] One `event_*.go` per outbox concern, workers accept `ctx`
 - [ ] `setup_connections.go` registers new workers
 - [ ] `setup_domains.go` wires new domain service
 - [ ] `setup_gateway.go` registers new handler + reflection
