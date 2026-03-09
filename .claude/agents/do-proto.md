@@ -28,6 +28,7 @@ syntax = "proto3";
 
 package <domain>.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "<domain>/v1;<domain>v1";
@@ -41,9 +42,9 @@ enum <Resource>Status {
 
 message <Resource> {
   string id = 1;
-  string title = 2;
-  string body = 3;
-  <Resource>Status status = 4;
+  string title = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string body = 3 [(buf.validate.field).string.min_len = 1];
+  <Resource>Status status = 4 [(buf.validate.field).enum = {defined_only: true}];
   repeated string tags = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
@@ -55,6 +56,8 @@ Conventions:
 - Use `google.protobuf.Timestamp` for time fields (not strings)
 - Resource message holds the full representation returned in responses
 - `go_package` uses the alias format: `<domain>/v1;<domain>v1`
+- Model messages MUST have `buf/validate` annotations — these are enforced when the model is embedded in Update requests with FieldMask
+- Cross-domain relationships use Ref types (e.g., `space.v1.SpaceRef`) in the model, not plain `string` IDs
 
 #### `protos/<domain>/v1/<domain>_refs.proto` — Typed ID References
 
@@ -85,6 +88,7 @@ syntax = "proto3";
 package <domain>.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "<domain>/v1/<domain>_model.proto";
 
@@ -95,7 +99,7 @@ service <Resource>Service {
   rpc Get<Resource>(Get<Resource>Request) returns (Get<Resource>Response);
   rpc List<Resource>(List<Resource>Request) returns (List<Resource>Response);
   rpc Update<Resource>(Update<Resource>Request) returns (Update<Resource>Response);
-  rpc Delete<Resource>(Delete<Resource>Request) returns (Delete<Resource>Response);
+  rpc Delete<Resource>(Delete<Resource>Request) returns (google.protobuf.Empty);
 }
 
 // Create
@@ -124,7 +128,7 @@ message Get<Resource>Response {
 // List
 
 message List<Resource>Request {
-  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  int32 page_size = 1 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
   string page_token = 2;
 }
 
@@ -150,24 +154,22 @@ message Update<Resource>Response {
 message Delete<Resource>Request {
   string id = 1 [(buf.validate.field).string.uuid = true];
 }
-
-message Delete<Resource>Response {
-  bool success = 1;
-}
 ```
 
 Conventions:
 - CRUD naming: `Create<Resource>`, `Get<Resource>`, `List<Resource>`, `Update<Resource>`, `Delete<Resource>`
-- Every RPC has a `<RpcName>Request` and `<RpcName>Response` message pair
+- Every RPC has a `<RpcName>Request` and `<RpcName>Response` message pair — except Delete, which returns `google.protobuf.Empty` (errors use gRPC status codes)
 - Response messages that return an entity wrap it in a named field (e.g., `Create<Resource>Response { <Resource> <resource> = 1; }`)
 - Within the same package, requests use plain `string id` fields (not Ref types)
 - List response items field is always named `items` for consistency across all entities
 - IDs validated as UUID: `[(buf.validate.field).string.uuid = true]`
 - Strings validated with length bounds: `{min_len: 1, max_len: 255}`
 - Enums validated to exclude unspecified: `{defined_only: true, not_in: [0]}`
-- Pagination: `page_size` with range validation `{gte: 1, lte: 100}` + `page_token`
+- Pagination: `page_size` with range validation `{gte: 0, lte: 100}` + `page_token` — `0` means "use server default" (AIP-158)
 - Update uses `google.protobuf.FieldMask` to specify which fields to update
+- Update embeds the full model message (not a separate payload) — FieldMask gates which fields are applied
 - Update `<resource>` and `update_mask` are both required
+- Cross-domain references: Create requests use Ref types (e.g., `SpaceRef`) to express ownership; Get/List/Update/Delete operate by ID alone — the API does not assume access scoping by parent
 
 ### 2. buf.yaml — `protos/buf.yaml`
 
@@ -195,10 +197,14 @@ deps:
 - [ ] All ID fields validated as UUID: `[(buf.validate.field).string.uuid = true]`
 - [ ] String fields have length validation
 - [ ] Enum fields exclude unspecified: `{defined_only: true, not_in: [0]}`
-- [ ] Pagination: `page_size` with `{gte: 1, lte: 100}` + `page_token` / `next_page_token`
+- [ ] Model message has `buf/validate` annotations (enforced via FieldMask updates)
+- [ ] Model uses Ref types for cross-domain relationships (not plain string IDs)
+- [ ] Pagination: `page_size` with `{gte: 0, lte: 100}` + `page_token` / `next_page_token`
 - [ ] Ref message defined for cross-package ID references (within same package, use plain `string id`)
 - [ ] List response items field named `items`
 - [ ] Response messages wrap entity in a named field
+- [ ] Delete RPCs return `google.protobuf.Empty` (not a response with `bool success`)
+- [ ] Cross-domain refs only on Create requests (Get/List/Update/Delete operate by ID alone)
 - [ ] `protos/buf.yaml` present at protobuf root with protovalidate dependency
 - [ ] No SQL files in this PR (entity-store agent handles that)
 - [ ] `make codegen` succeeds
