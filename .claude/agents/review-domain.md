@@ -47,6 +47,7 @@ Scan all imports in the domain package:
 - [ ] Imports from `gen/db/<domain>` — ALLOWED
 - [ ] Imports from `pkg/cache` — ALLOWED
 - [ ] Imports from `pkg/outbox` — ALLOWED
+- [ ] Imports from `pkg/pagination` — ALLOWED
 - [ ] NO imports from `gen/sdk/` (proto/connect generated code)
 - [ ] NO imports from `internal/api/`
 - [ ] NO imports from `internal/outbox/`
@@ -71,7 +72,7 @@ For each read `op_*.go`, verify the cache-first pattern:
 - [ ] `op_get.go` checks cache before querying the database
 - [ ] `op_get.go` populates cache on cache miss
 - [ ] `op_get.go` maps `pgx.ErrNoRows` to `ErrNotFound`
-- [ ] `op_list.go` implements pagination with `pageSize` and `pageToken`
+- [ ] `op_list.go` uses `pkg/pagination` (no local pagination helpers)
 - [ ] `op_list.go` returns a `nextPageToken` when more results exist
 
 ### Delete Operation
@@ -79,12 +80,14 @@ For each read `op_*.go`, verify the cache-first pattern:
 - [ ] `op_delete.go` checks affected rows and returns `ErrNotFound` if zero
 - [ ] `op_delete.go` invalidates cache after successful delete
 - [ ] `op_delete.go` emits outbox event within transaction
+- [ ] Cascade deletes emit a separate outbox event for the side-effect (e.g., `space.content_deleted`) so consumers can invalidate related caches
 
 ### Error Handling
 
 - [ ] All sentinel errors defined in `errors.go` using `errors.New()`
 - [ ] `ErrNotFound` exists
-- [ ] `ErrAlreadyExists` exists (if create can conflict)
+- [ ] `ErrAlreadyExists` exists (if SQL schema has unique constraints) — check the migration for unique indexes
+- [ ] Create operation maps `pgerrcode.UniqueViolation` via `pgconn.PgError` to `ErrAlreadyExists` — no hardcoded postgres error codes
 - [ ] No error wrapping that would break `errors.Is()` matching
 - [ ] No generic error returns where a sentinel would be appropriate
 

@@ -65,9 +65,13 @@ func New(deps Dependencies) Service {
 Each write operation:
 - Opens a transaction
 - Executes the sqlc query within the transaction
+- Maps `pgerrcode.UniqueViolation` to `ErrAlreadyExists` when the SQL schema has unique constraints (use `github.com/jackc/pgerrcode` — never hardcode postgres error codes)
 - Emits outbox events within the transaction
 - Commits
 - Updates cache after commit
+
+Cascade deletes (e.g., deleting a parent soft-deletes children):
+- Emit a separate outbox event for the cascade side-effect so consumers can invalidate related caches
 
 Each read operation:
 - Checks cache first
@@ -87,8 +91,9 @@ Each read operation:
 
 ## Layer Rules
 
-- Can depend on: `gen/db/<domain>`, `pkg/cache`, `pkg/outbox`
+- Can depend on: `gen/db/<domain>`, `pkg/cache`, `pkg/outbox`, `pkg/pagination`
 - Must NOT depend on: `gen/sdk/`, `internal/api/`, `internal/outbox/`, `cmd/`
+- Use `pkg/pagination.DecodePageToken` and `pkg/pagination.NextPageToken` for list operations — do NOT duplicate pagination logic in domain packages
 
 ## Post-Generation
 
@@ -101,7 +106,10 @@ Each read operation:
 - [ ] `service.go` with interface, Dependencies, constructor
 - [ ] One `op_*.go` per operation
 - [ ] All writes use transaction + outbox + cache pattern
+- [ ] Create maps `pgerrcode.UniqueViolation` → `ErrAlreadyExists` when unique constraints exist
+- [ ] Cascade deletes emit outbox events for affected related entities
 - [ ] All reads check cache first
+- [ ] List operations use `pkg/pagination` (not local helpers)
 - [ ] `pgx.ErrNoRows` mapped to `ErrNotFound`
 - [ ] No imports from `internal/api/`, `internal/outbox/`, `cmd/`, or `gen/sdk/`
 - [ ] `make vet` passes
