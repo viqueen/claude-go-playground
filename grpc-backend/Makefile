@@ -18,7 +18,7 @@ build: vet
 	docker build .
 
 test: vet
-	go test ./...
+	go test $(GOTEST_FLAGS) ./...
 
 # --- infra ---
 

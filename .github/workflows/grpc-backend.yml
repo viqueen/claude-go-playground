@@ -39,5 +39,14 @@ jobs:
           go-version-file: grpc-backend/go.mod
           cache-dependency-path: grpc-backend/go.sum
 
+      - name: Codegen
+        run: make codegen
+
       - name: Test
-        run: make test
+        run: make test GOTEST_FLAGS="-race -coverprofile=coverage.out -covermode=atomic"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: grpc-backend/coverage.out
