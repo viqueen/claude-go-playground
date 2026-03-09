@@ -1,0 +1,29 @@
+package apispacev1
+
+import (
+	"context"
+
+	uuid "github.com/gofrs/uuid/v5"
+
+	spacev1 "github.com/viqueen/claude-go-playground/grpc-backend/gen/sdk/space/v1"
+	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/grpcutil"
+)
+
+func (h *handler) UpdateSpace(
+	ctx context.Context,
+	req *spacev1.UpdateSpaceRequest,
+) (*spacev1.UpdateSpaceResponse, error) {
+	id, err := uuid.FromString(req.GetId())
+	if err != nil {
+		return nil, grpcutil.NewErrorFrom(err, errorMappings)
+	}
+	params := fromProtoUpdate(req)
+	params.ID = id
+	result, err := h.service.Update(ctx, params)
+	if err != nil {
+		return nil, grpcutil.NewErrorFrom(err, errorMappings)
+	}
+	return &spacev1.UpdateSpaceResponse{
+		Space: toProto(result),
+	}, nil
+}
