@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/server ./cmd/server"
+bin = "tmp/server"
+include_ext = ["go", "sql"]
+exclude_dir = [".git", "tmp", "vendor", "gen"]
+delay = 1000
+stop_on_error = true
+log = "tmp/air_errors.log"
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true
