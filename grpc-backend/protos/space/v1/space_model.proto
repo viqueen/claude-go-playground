@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package space.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "space/v1;spacev1";
+
+enum SpaceStatus {
+  SPACE_STATUS_UNSPECIFIED = 0;
+  SPACE_STATUS_DRAFT = 1;
+  SPACE_STATUS_ACTIVE = 2;
+  SPACE_STATUS_ARCHIVED = 3;
+}
+
+enum SpaceVisibility {
+  SPACE_VISIBILITY_UNSPECIFIED = 0;
+  SPACE_VISIBILITY_PRIVATE = 1;
+  SPACE_VISIBILITY_INTERNAL = 2;
+  SPACE_VISIBILITY_PUBLIC = 3;
+}
+
+message Space {
+  string id = 1;
+  string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string key = 3 [(buf.validate.field).string = {min_len: 1, max_len: 32, pattern: "^[A-Z][A-Z0-9_-]*$"}];
+  string description = 4;
+  SpaceStatus status = 5 [(buf.validate.field).enum = {defined_only: true}];
+  SpaceVisibility visibility = 6 [(buf.validate.field).enum = {defined_only: true}];
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}

@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package content.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "space/v1/space_refs.proto";
+
+option go_package = "content/v1;contentv1";
+
+enum ContentStatus {
+  CONTENT_STATUS_UNSPECIFIED = 0;
+  CONTENT_STATUS_DRAFT = 1;
+  CONTENT_STATUS_PUBLISHED = 2;
+  CONTENT_STATUS_ARCHIVED = 3;
+}
+
+message Content {
+  string id = 1;
+  space.v1.SpaceRef space = 2;
+  string title = 3 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string body = 4 [(buf.validate.field).string.min_len = 1];
+  ContentStatus status = 5 [(buf.validate.field).enum = {defined_only: true}];
+  repeated string tags = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
