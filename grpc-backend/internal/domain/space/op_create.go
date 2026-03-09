@@ -29,7 +29,7 @@ func (s *service) Create(ctx context.Context, params db.CreateSpaceParams) (*db.
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "space.created",
+		Type: EventCreated,
 		ID:   space.ID.String(),
 		Data: space,
 	}); err != nil {

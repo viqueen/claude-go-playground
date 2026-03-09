@@ -32,8 +32,8 @@ type AuditWorker struct {
 	river.WorkerDefaults[AuditArgs]
 }
 
-func (w *AuditWorker) Work(_ context.Context, job *river.Job[AuditArgs]) error {
-	log.Info().
+func (w *AuditWorker) Work(ctx context.Context, job *river.Job[AuditArgs]) error {
+	log.Ctx(ctx).Info().
 		Str("event_type", job.Args.EventType).
 		Str("space_id", job.Args.SpaceID).
 		Msg("auditing space event")

@@ -1,12 +1,22 @@
 package apispacev1
 
 import (
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
 	spacev1 "github.com/viqueen/claude-go-playground/grpc-backend/gen/sdk/space/v1"
 )
+
+var supportedUpdatePaths = map[string]bool{
+	"name":        true,
+	"key":         true,
+	"description": true,
+	"status":      true,
+	"visibility":  true,
+}
 
 func toProto(model *db.CollaborationSpace) *spacev1.Space {
 	return &spacev1.Space{
@@ -37,6 +47,18 @@ func fromProtoCreate(req *spacev1.CreateSpaceRequest) db.CreateSpaceParams {
 		Status:      int32(spacev1.SpaceStatus_SPACE_STATUS_DRAFT),
 		Visibility:  int32(req.GetVisibility()),
 	}
+}
+
+func validateUpdateMask(paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("update_mask must contain at least one path")
+	}
+	for _, path := range paths {
+		if !supportedUpdatePaths[path] {
+			return fmt.Errorf("unsupported update_mask path: %q", path)
+		}
+	}
+	return nil
 }
 
 func fromProtoUpdate(req *spacev1.UpdateSpaceRequest) db.UpdateSpaceParams {

@@ -32,8 +32,8 @@ type IndexWorker struct {
 	river.WorkerDefaults[IndexArgs]
 }
 
-func (w *IndexWorker) Work(_ context.Context, job *river.Job[IndexArgs]) error {
-	log.Info().
+func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error {
+	log.Ctx(ctx).Info().
 		Str("event_type", job.Args.EventType).
 		Str("space_id", job.Args.SpaceID).
 		Msg("indexing space")

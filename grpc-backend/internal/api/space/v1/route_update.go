@@ -19,6 +19,12 @@ func (h *handler) UpdateSpace(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid id: %v", err)
 	}
+	if spaceID := req.GetSpace().GetId(); spaceID != "" && spaceID != req.GetId() {
+		return nil, status.Errorf(codes.InvalidArgument, "space.id %q does not match request id %q", spaceID, req.GetId())
+	}
+	if err := validateUpdateMask(req.GetUpdateMask().GetPaths()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 	params := fromProtoUpdate(req)
 	params.ID = id
 	result, err := h.service.Update(ctx, params)

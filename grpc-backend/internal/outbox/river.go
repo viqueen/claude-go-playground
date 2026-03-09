@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
+	spacedomain "github.com/viqueen/claude-go-playground/grpc-backend/internal/domain/space"
 	spaceevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/outbox"
 )
@@ -38,21 +39,21 @@ func (o *riverOutbox) Emit(ctx context.Context, tx pgx.Tx, events ...outbox.Even
 // mapEvent fans out a domain event into one or more river jobs.
 func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 	switch event.Type {
-	case "space.created":
+	case spacedomain.EventCreated:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
 			spaceevents.NewAuditArgs(event),
 		}, nil
-	case "space.updated":
+	case spacedomain.EventUpdated:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
 		}, nil
-	case "space.deleted":
+	case spacedomain.EventDeleted:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
 			spaceevents.NewAuditArgs(event),
 		}, nil
-	case "space.content_deleted":
+	case spacedomain.EventContentDeleted:
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
 		}, nil
