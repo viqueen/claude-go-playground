@@ -21,7 +21,7 @@ func (s *service) Create(ctx context.Context, params db.CreateContentParams) (*d
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "content.created",
+		Type: EventCreated,
 		ID:   content.ID.String(),
 		Data: content,
 	}); err != nil {

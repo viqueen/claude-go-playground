@@ -7,7 +7,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
+	contentdomain "github.com/viqueen/claude-go-playground/grpc-backend/internal/domain/content"
 	spacedomain "github.com/viqueen/claude-go-playground/grpc-backend/internal/domain/space"
+	contentevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/content"
 	spaceevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/outbox"
 )
@@ -58,6 +60,21 @@ func (o *riverOutbox) mapEvent(event outbox.Event) ([]river.JobArgs, error) {
 		return []river.JobArgs{
 			spaceevents.NewIndexArgs(event),
 			spaceevents.NewAuditArgs(event),
+		}, nil
+	case contentdomain.EventCreated:
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
+		}, nil
+	case contentdomain.EventUpdated:
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
+		}, nil
+	case contentdomain.EventDeleted:
+		return []river.JobArgs{
+			contentevents.NewIndexArgs(event),
+			contentevents.NewAuditArgs(event),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", event.Type)

@@ -26,7 +26,7 @@ func (s *service) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "content.deleted",
+		Type: EventDeleted,
 		ID:   content.ID.String(),
 		Data: content,
 	}); err != nil {

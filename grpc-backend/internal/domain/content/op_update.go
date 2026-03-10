@@ -27,7 +27,7 @@ func (s *service) Update(ctx context.Context, params db.UpdateContentParams) (*d
 	}
 
 	if err := s.outbox.Emit(ctx, tx, outbox.Event{
-		Type: "content.updated",
+		Type: EventUpdated,
 		ID:   content.ID.String(),
 		Data: content,
 	}); err != nil {
