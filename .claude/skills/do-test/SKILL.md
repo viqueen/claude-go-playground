@@ -6,7 +6,13 @@ disable-model-invocation: true
 context: fork
 ---
 
-Read and follow the agent instructions from `.claude/agents/do-test.md`.
-
 Domain: $0
 Project: $1
+
+# Test Agent
+
+Add unit and integration tests for a domain. This PR is auditable as: **"Is this adequately tested?"**
+
+Depends on: `do-integrate` agent PR (full domain must be wired).
+
+Read the detailed instructions from `instructions.md` in this skill directory.

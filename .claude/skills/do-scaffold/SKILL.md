@@ -6,6 +6,11 @@ disable-model-invocation: true
 context: fork
 ---
 
-Read and follow the agent instructions from `.claude/agents/do-scaffold.md`.
-
 Project: $ARGUMENTS
+
+# Scaffold Agent
+
+Generate the full project skeleton with empty stubs. The PR should compile, boot, and do nothing.
+No business logic — just structure.
+
+Read the detailed instructions from `instructions.md` in this skill directory.
