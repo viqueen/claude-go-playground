@@ -109,12 +109,10 @@ protos/<domain>/v1/         # .proto files
 | UNAVAILABLE         | 503  | Service dependency unavailable |
 | DEADLINE_EXCEEDED   | 504  | Timeout                        |
 
-## Skills & Agents
+## Skills
 
 Skills are defined in `.claude/skills/` as slash commands. Each skill runs in a forked context
-and references detailed agent instructions from `.claude/agents/`.
-
-Agents can also be invoked directly via `claude --agent <name>`.
+with self-contained instructions (no separate agent files).
 
 ### Build Skills
 
