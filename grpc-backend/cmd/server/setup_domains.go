@@ -4,6 +4,7 @@ import (
 	uuid "github.com/gofrs/uuid/v5"
 
 	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
+	contentdomain "github.com/viqueen/claude-go-playground/grpc-backend/internal/domain/content"
 	spacedomain "github.com/viqueen/claude-go-playground/grpc-backend/internal/domain/space"
 	riveroutbox "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/cache"
@@ -11,7 +12,8 @@ import (
 
 // Domains holds all domain services.
 type Domains struct {
-	SpaceService spacedomain.Service
+	SpaceService   spacedomain.Service
+	ContentService contentdomain.Service
 }
 
 func setupDomains(connections *Connections) *Domains {
@@ -25,7 +27,15 @@ func setupDomains(connections *Connections) *Domains {
 		Outbox:  outbox,
 	})
 
+	contentService := contentdomain.New(contentdomain.Dependencies{
+		Pool:    connections.Pool,
+		Queries: queries,
+		Cache:   cache.NewInMemory[uuid.UUID, *db.CollaborationContent](),
+		Outbox:  outbox,
+	})
+
 	return &Domains{
-		SpaceService: spaceService,
+		SpaceService:   spaceService,
+		ContentService: contentService,
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	contentevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/content"
 	spaceevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/config"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/migrate"
@@ -63,6 +64,8 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &spaceevents.IndexWorker{})
 	river.AddWorker(workers, &spaceevents.AuditWorker{})
+	river.AddWorker(workers, &contentevents.IndexWorker{})
+	river.AddWorker(workers, &contentevents.AuditWorker{})
 
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 100}},
