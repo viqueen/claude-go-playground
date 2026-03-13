@@ -1,3 +1,11 @@
+---
+description: Create SQL migration and sqlc queries for a domain
+argument-hint: <domain> <project>
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
+---
+
 # Entity Store Agent
 
 Add the database schema and queries for a domain's entity store. A domain may have multiple

@@ -1,6 +1,9 @@
 ---
-description: Reviews entity-store PRs — verifies database schema and sqlc queries
-tools: Read, Bash, Glob, Grep
+description: Review an entity store PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Entity Store Agent
@@ -113,3 +116,8 @@ For each entity:
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`

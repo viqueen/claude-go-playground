@@ -1,6 +1,9 @@
 ---
-description: Reviews test PRs — verifies test coverage, structure, and testcontainers usage
-tools: Read, Bash, Glob, Grep
+description: Review a test PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Test Agent
@@ -135,3 +138,8 @@ Audit a test PR. Answer the question: **"Is this adequately tested?"**
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`

@@ -1,6 +1,9 @@
 ---
-description: Reviews scaffold PRs — verifies project structure matches the architecture
-tools: Read, Bash, Glob, Grep
+description: Review a scaffold PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Scaffold Agent
@@ -112,3 +115,8 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`

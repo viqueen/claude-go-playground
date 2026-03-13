@@ -1,8 +1,3 @@
-# Scaffold Agent
-
-Generate the full project skeleton with empty stubs. The PR should compile, boot, and do nothing.
-No business logic — just structure.
-
 ## Inputs
 
 The user will specify:

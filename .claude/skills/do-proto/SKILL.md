@@ -1,3 +1,11 @@
+---
+description: Define proto files for a domain
+argument-hint: <domain> <project>
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
+---
+
 # Proto Agent
 
 Add the API contract for a domain. No Go business logic, no SQL — just the proto definition.

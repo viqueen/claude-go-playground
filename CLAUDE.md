@@ -109,28 +109,29 @@ protos/<domain>/v1/         # .proto files
 | UNAVAILABLE         | 503  | Service dependency unavailable |
 | DEADLINE_EXCEEDED   | 504  | Timeout                        |
 
-## Agents
+## Skills
 
-Agents are defined in `.claude/agents/`. Use them via `claude --agent <name>`.
+Skills are defined in `.claude/skills/` as slash commands. Each skill runs in a forked context
+with self-contained instructions (no separate agent files).
 
-### Build Agents
+### Build Skills
 
-| Agent | Purpose | PR character |
-|-------|---------|--------------|
-| `do-scaffold` | Project skeleton with empty stubs | "Does the structure match our architecture?" |
-| `do-proto` | Proto definition for a domain | "Is the API contract right?" |
-| `do-entity-store` | SQL migration + sqlc queries for a domain | "Is the data model right?" |
-| `do-domain` | Business logic for a domain | "Is the logic correct?" |
-| `do-integrate` | API handler + outbox + wiring for a domain | "Is this wired correctly?" |
-| `do-test` | Unit + integration tests for a domain | "Is this adequately tested?" |
+| Skill | Usage | PR character |
+|-------|-------|--------------|
+| `/do-scaffold` | `/do-scaffold <project>` | "Does the structure match our architecture?" |
+| `/do-proto` | `/do-proto <domain> <project>` | "Is the API contract right?" |
+| `/do-entity-store` | `/do-entity-store <domain> <project>` | "Is the data model right?" |
+| `/do-domain` | `/do-domain <domain> <project>` | "Is the logic correct?" |
+| `/do-integrate` | `/do-integrate <domain> <project>` | "Is this wired correctly?" |
+| `/do-test` | `/do-test <domain> <project>` | "Is this adequately tested?" |
 
-### Review Agents (subagents for PR review sessions)
+### Review Skills
 
-| Agent | Reviews PRs from | Audit question |
-|-------|-----------------|----------------|
-| `review-scaffold` | `do-scaffold` | Does the structure match our architecture? |
-| `review-proto` | `do-proto` | Is the API contract right? |
-| `review-entity-store` | `do-entity-store` | Is the data model right? |
-| `review-domain` | `do-domain` | Is the logic correct? |
-| `review-integrate` | `do-integrate` | Is this wired correctly? |
-| `review-test` | `do-test` | Is this adequately tested? |
+| Skill | Usage | Audit question |
+|-------|-------|----------------|
+| `/review-scaffold` | `/review-scaffold <pr-number>` | Does the structure match our architecture? |
+| `/review-proto` | `/review-proto <pr-number>` | Is the API contract right? |
+| `/review-entity-store` | `/review-entity-store <pr-number>` | Is the data model right? |
+| `/review-domain` | `/review-domain <pr-number>` | Is the logic correct? |
+| `/review-integrate` | `/review-integrate <pr-number>` | Is this wired correctly? |
+| `/review-test` | `/review-test <pr-number>` | Is this adequately tested? |

@@ -1,6 +1,9 @@
 ---
-description: Reviews domain PRs — verifies business logic correctness and layer rules
-tools: Read, Bash, Glob, Grep
+description: Review a domain PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Domain Agent
@@ -125,3 +128,8 @@ For each read `op_*.go`, verify the cache-first pattern:
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`

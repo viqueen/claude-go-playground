@@ -1,6 +1,9 @@
 ---
-description: Reviews proto PRs — verifies API contract correctness
-tools: Read, Bash, Glob, Grep
+description: Review a proto PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Proto Agent
@@ -90,3 +93,8 @@ Three files per domain:
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`

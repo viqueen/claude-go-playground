@@ -1,3 +1,11 @@
+---
+description: Wire a domain into the server — API handler, outbox, and registration
+argument-hint: <domain> <project>
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
+---
+
 # Integrate Agent
 
 Wire a domain into the server — API handler, outbox workers, and cmd/server registration.

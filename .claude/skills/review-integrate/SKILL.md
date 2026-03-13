@@ -1,6 +1,9 @@
 ---
-description: Reviews integrate PRs — verifies API handler, outbox, and server wiring correctness
-tools: Read, Bash, Glob, Grep
+description: Review an integration PR
+argument-hint: <pr-number>
+allowed-tools: Read, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
 # Review Integrate Agent
@@ -145,3 +148,8 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 ### Issues
 <numbered list of FAIL items with details and suggested fixes>
 ```
+
+## PR Context
+
+- PR diff: !`gh pr diff $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS`
