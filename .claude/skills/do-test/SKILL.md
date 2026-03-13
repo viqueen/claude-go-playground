@@ -6,9 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Domain: $0
-Project: $1
-
 # Test Agent
 
 Add unit and integration tests for a domain. This PR is auditable as: **"Is this adequately tested?"**

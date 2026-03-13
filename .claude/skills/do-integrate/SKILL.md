@@ -6,9 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Domain: $0
-Project: $1
-
 # Integrate Agent
 
 Wire a domain into the server — API handler, outbox workers, and cmd/server registration.

@@ -6,8 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Project: $ARGUMENTS
-
 # Scaffold Agent
 
 Generate the full project skeleton with empty stubs. The PR should compile, boot, and do nothing.

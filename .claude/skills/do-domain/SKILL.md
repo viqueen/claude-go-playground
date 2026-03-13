@@ -6,9 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Domain: $0
-Project: $1
-
 # Domain Agent
 
 Implement the business logic for a domain. This PR is auditable as: **"Is the logic correct?"**

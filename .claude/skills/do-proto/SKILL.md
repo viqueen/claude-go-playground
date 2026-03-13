@@ -6,9 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Domain: $0
-Project: $1
-
 # Proto Agent
 
 Add the API contract for a domain. No Go business logic, no SQL — just the proto definition.

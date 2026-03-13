@@ -6,9 +6,6 @@ disable-model-invocation: true
 context: fork
 ---
 
-Domain: $0
-Project: $1
-
 # Entity Store Agent
 
 Add the database schema and queries for a domain's entity store. A domain may have multiple
