@@ -2,8 +2,11 @@
 description: Create SQL migration and sqlc queries for a domain
 argument-hint: <domain> <project>
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
+disable-model-invocation: true
+context: fork
 ---
 
-Run the `do-entity-store` agent instructions from `.claude/agents/do-entity-store.md`.
+Read and follow the agent instructions from `.claude/agents/do-entity-store.md`.
 
-Arguments (domain project): $ARGUMENTS
+Domain: $0
+Project: $1
