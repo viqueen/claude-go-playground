@@ -38,16 +38,25 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/gofrs/uuid/v5"
 )
 
-// Search defines the interface for indexing and deleting documents.
+// Hit represents a single search result with its raw JSON source.
+type Hit struct {
+	ID     uuid.UUID
+	Source json.RawMessage
+}
+
+// Search defines the interface for indexing, deleting, and querying documents.
 type Search interface {
 	// Index indexes or updates a document in the given index.
 	Index(ctx context.Context, index string, id uuid.UUID, document any) error
 	// Delete removes a document from the given index.
 	Delete(ctx context.Context, index string, id uuid.UUID) error
+	// Query searches an index with a raw OpenSearch query JSON and returns matching hits.
+	Query(ctx context.Context, index string, query []byte) ([]Hit, error)
 	// CreateIndexIfNotExists ensures an index exists with the given mapping.
 	CreateIndexIfNotExists(ctx context.Context, index string, mapping []byte) error
 }
@@ -95,15 +104,44 @@ var FS embed.FS
 
 Plain JSON, one file per domain. The file name matches the domain name (not the index name).
 
+The mapping must distinguish between **reference fields** (used for exact-match filtering and lookups)
+and **searchable fields** (used for full-text search). This distinction determines the OpenSearch type:
+
+- **Reference fields** → `keyword`: unique identifiers, foreign keys, enum-like values, tags.
+  These are fields users filter or look up by exact value (e.g., find space by key, find content by space_id, filter by tag).
+- **Searchable fields** → `text` with analyzer: human-readable text users search within
+  (e.g., search spaces by name, search content by title or body).
+
+Cross-reference the SQL schema and proto definitions to identify which fields are references
+(unique indexes, foreign keys, enums, arrays of labels) vs. searchable (names, titles, descriptions, bodies).
+
+Example for a space entity (SQL has: name, key, description, status, visibility):
+
 ```json
 {
   "mappings": {
     "properties": {
-      "id":         { "type": "keyword" },
-      "name":       { "type": "text", "analyzer": "standard" },
-      "status":     { "type": "integer" },
-      "created_at": { "type": "date" },
-      "updated_at": { "type": "date" }
+      "key":         { "type": "keyword" },
+      "name":        { "type": "text", "analyzer": "standard" },
+      "description": { "type": "text", "analyzer": "standard" },
+      "status":      { "type": "integer" },
+      "visibility":  { "type": "integer" }
+    }
+  }
+}
+```
+
+Example for a content entity (SQL has: space_id FK, title, body, status, tags[]):
+
+```json
+{
+  "mappings": {
+    "properties": {
+      "space_id": { "type": "keyword" },
+      "title":    { "type": "text", "analyzer": "standard" },
+      "body":     { "type": "text", "analyzer": "standard" },
+      "status":   { "type": "integer" },
+      "tags":     { "type": "keyword" }
     }
   }
 }
@@ -113,25 +151,28 @@ Conventions:
 - File naming: `<domain>.json` (e.g., `space.json`, `content.json`)
 - One file per domain index
 - Pure JSON — no Go string escaping, no backtick literals
-- Map proto/SQL types to OpenSearch types:
-  - `UUID` / `TEXT` with keyword semantics → `keyword`
-  - `TEXT` with full-text search → `text` with `standard` analyzer
-  - `INT` / enum → `integer`
-  - `TEXT[]` → `keyword` (array — OpenSearch handles arrays natively)
-  - `TIMESTAMPTZ` → `date`
-  - `BOOLEAN` → `boolean`
+- **Do not index `id`** — OpenSearch uses `_id` (the document ID) natively for lookups by ID. Indexing `id` as a field is redundant.
+- **Do not index `created_at` / `updated_at`** unless the domain requires time-range search. Timestamps are metadata, not reference or search fields.
+- **Do not index `deleted_at`** — soft-deleted entities are removed from the index on delete events.
+- Type mapping rules:
+  - UUID foreign keys (e.g., `space_id`) → `keyword` (exact-match filter)
+  - Unique keys (e.g., space `key`) → `keyword` (exact-match lookup)
+  - Enums / integers (e.g., `status`, `visibility`) → `integer` (exact-match filter)
+  - Arrays of labels (e.g., `tags`) → `keyword` (OpenSearch handles arrays natively, each element is a keyword)
+  - Human-readable text (e.g., `name`, `title`, `body`) → `text` with `standard` analyzer (full-text search)
+  - Booleans → `boolean`
 
 ### 3. `internal/outbox/<domain>/index.go` — Index name, mapping, and document struct
 
 All domain-specific search concerns live in the outbox domain package — the index name constant,
 the embedded mapping loader, and the document struct with its mapper from sqlc models.
 
+Example for a space entity:
+
 ```go
-package <domain>
+package space
 
 import (
-	"time"
-
 	db<domain> "<module>/gen/db/<domain>"
 	"<module>/internal/outbox/<domain>/mappings"
 )
@@ -150,22 +191,23 @@ func must(data []byte, err error) []byte {
 }
 
 // <Domain>Document represents the search document for a <domain>.
+// Fields match the mapping properties in mappings/<domain>.json exactly.
 type <Domain>Document struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    int32     `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      int32  `json:"status"`
+	Visibility  int32  `json:"visibility"`
 }
 
 // New<Domain>Document maps a sqlc model to a search document.
 func New<Domain>Document(model *db<domain>.<Entity>) <Domain>Document {
 	return <Domain>Document{
-		ID:        model.ID.String(),
-		Name:      model.Name,
-		Status:    model.Status,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
+		Key:         model.Key,
+		Name:        model.Name,
+		Description: model.Description,
+		Status:      model.Status,
+		Visibility:  model.Visibility,
 	}
 }
 ```
@@ -174,9 +216,9 @@ Conventions:
 - Index name is plural lowercase: `spaces`, `contents`
 - Mapping loaded from embedded FS at package init — panics on missing file (build-time guarantee)
 - `var` (not `const`) because `[]byte` cannot be a const
+- **Document struct fields = mapping properties**: only include fields that are in the mapping JSON. Do not include `id` (OpenSearch `_id` handles this), `created_at`, `updated_at`, or `deleted_at`.
 - Document struct JSON tags must match the property names in the corresponding `<domain>.json` mapping file exactly
-- UUIDs are serialized as strings
-- Timestamps use `time.Time` (serialized as ISO 8601 by default — compatible with OpenSearch `date` type)
+- UUID foreign keys (e.g., `space_id`) are serialized as strings in the document
 - The `New<Domain>Document` function maps from sqlc model to search document — this is the single source of truth for the mapping
 
 ### 4. Update `internal/outbox/<domain>/event_index.go` — Wire index workers to OpenSearch

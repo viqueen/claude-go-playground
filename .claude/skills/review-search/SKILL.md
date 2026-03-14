@@ -30,8 +30,10 @@ Identify which project from the PR file paths.
 
 ### Search Package — `pkg/search/`
 
-- [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `CreateIndexIfNotExists` methods
+- [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `Query`, `CreateIndexIfNotExists` methods
 - [ ] `Index` and `Delete` accept `uuid.UUID` for the `id` parameter (not `string`)
+- [ ] `Query` accepts `[]byte` (raw OpenSearch query JSON) and returns `[]Hit`
+- [ ] `Hit` struct has `ID uuid.UUID` and `Source json.RawMessage`
 - [ ] `CreateIndexIfNotExists` accepts `[]byte` (embedded JSON), not `string`
 - [ ] Implementation struct is private (lowercase)
 - [ ] Constructor `New()` returns `(Search, error)` — interface, not struct
@@ -53,18 +55,18 @@ Identify which project from the PR file paths.
 - [ ] `IndexMapping` loaded from embedded FS via `mappings.FS.ReadFile("<domain>.json")`
 - [ ] Mapping is a `var` (not `const`) since it's `[]byte`
 - [ ] Document struct defined in same package with JSON tags
+- [ ] Document struct does NOT include `id`, `created_at`, `updated_at`, or `deleted_at`
 - [ ] `New<Domain>Document()` mapper converts sqlc model to document struct
-- [ ] UUIDs serialized as strings
-- [ ] Timestamps use `time.Time` (ISO 8601 compatible with OpenSearch `date` type)
-- [ ] Field types in `.json` align with SQL schema:
-  - UUID / keyword fields → `keyword`
-  - Full-text fields → `text` with appropriate analyzer
-  - Enums / integers → `integer`
-  - Arrays → `keyword` (OpenSearch handles arrays natively)
-  - Timestamps → `date`
-  - Booleans → `boolean`
-- [ ] All searchable fields from the entity are included in the mapping
-- [ ] No unnecessary fields indexed (e.g., `deleted_at` should not be indexed)
+- [ ] UUID foreign keys (e.g., `space_id`) serialized as strings
+- [ ] **Reference fields** mapped as `keyword`: unique keys, foreign keys (UUIDs), tag arrays
+- [ ] **Searchable fields** mapped as `text` with analyzer: names, titles, descriptions, bodies
+- [ ] Enums / integers mapped as `integer`
+- [ ] Arrays of labels (e.g., `tags`) mapped as `keyword` (OpenSearch handles arrays natively)
+- [ ] `id` is NOT in the mapping — OpenSearch `_id` handles document identity
+- [ ] `created_at` / `updated_at` NOT indexed unless time-range search is required
+- [ ] `deleted_at` NOT indexed — deleted entities are removed from the index
+- [ ] All reference and searchable fields from the entity are included
+- [ ] Field type choices cross-referenced against SQL schema (unique indexes → keyword, FK → keyword, TEXT → text)
 
 ### Index Worker — `internal/outbox/<domain>/event_index.go`
 
