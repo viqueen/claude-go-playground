@@ -26,7 +26,42 @@ The user will specify:
 
 ## What to generate
 
-### 1. `pkg/search/search.go` — Generic search client interface and constructor
+### 1. `pkg/embed/embed.go` — Generic embedder interface
+
+If this is the first domain being indexed, create the embedder package. If it already exists, skip this step.
+
+This package is **purely generic** — provider-agnostic, no domain knowledge.
+
+```go
+package embed
+
+import "context"
+
+// Embedder generates vector embeddings from text.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
+```
+
+The provider is chosen at wire time in `cmd/server/`. Implementations live in `pkg/embed/`:
+
+- `pkg/embed/opensearch.go` — uses OpenSearch's built-in ML plugin (`_plugins/_ml/models/<model_id>/_predict`). The model ID is configured via env var.
+- Additional providers (OpenAI, Cohere, etc.) can be added as `pkg/embed/<provider>.go` — each returns `Embedder` from a constructor.
+
+```go
+// OpenSearch ML plugin implementation
+func NewOpenSearch(client *opensearchapi.Client, modelID string) Embedder {
+	return &openSearchEmbedder{client: client, modelID: modelID}
+}
+```
+
+Conventions:
+- **Interface-first**: `Embedder` interface is public, implementations are private
+- Each provider is a separate file with its own constructor
+- Constructors return `Embedder` (the interface)
+- **No domain imports**: `pkg/embed/` must NOT import `gen/`, `internal/`, or any domain-specific code
+
+### 2. `pkg/search/search.go` — Generic search client interface and constructor
 
 If this is the first domain being indexed, create the shared search package. If it already exists, skip this step.
 
@@ -55,17 +90,37 @@ type Match struct {
 	Query string
 }
 
-// Criteria defines a typed search query — filters for reference fields,
-// matches for searchable fields. The implementation translates this into
-// an OpenSearch bool query internally.
+// Vector represents a k-NN vector search on a knn_vector field.
+type Vector struct {
+	Field  string
+	Values []float32
+	K      int
+}
+
+// Criteria defines a typed search query. The implementation translates this
+// into an OpenSearch hybrid query internally:
+// - Filters become term clauses (exact match, no scoring)
+// - Matches become match clauses (full-text, scored)
+// - Vector becomes a k-NN clause (semantic similarity, scored)
+// Filters, matches, and vector are combined for hybrid search.
 type Criteria struct {
-	Filters []Filter
-	Matches []Match
+	Filters   []Filter
+	Matches   []Match
+	Vector    *Vector
+	PageSize  int32
+	PageToken string
+}
+
+// Page represents a paginated set of search results.
+type Page struct {
+	Hits          []Hit
+	NextPageToken string
 }
 
 // Hit represents a single search result with its raw JSON source.
 type Hit struct {
 	ID     uuid.UUID
+	Score  float32
 	Source json.RawMessage
 }
 
@@ -75,8 +130,8 @@ type Search interface {
 	Index(ctx context.Context, index string, id uuid.UUID, document any) error
 	// Delete removes a document from the given index.
 	Delete(ctx context.Context, index string, id uuid.UUID) error
-	// Find searches an index using typed criteria and returns matching hits.
-	Find(ctx context.Context, index string, criteria Criteria) ([]Hit, error)
+	// Find searches an index using typed criteria and returns a paginated result.
+	Find(ctx context.Context, index string, criteria Criteria) (*Page, error)
 	// CreateIndexIfNotExists ensures an index exists with the given mapping.
 	CreateIndexIfNotExists(ctx context.Context, index string, mapping []byte) error
 }
@@ -84,10 +139,13 @@ type Search interface {
 
 Backed by `github.com/opensearch-project/opensearch-go/v4/opensearchapi`.
 
-The implementation translates `Criteria` into an OpenSearch `bool` query:
+The implementation translates `Criteria` into an OpenSearch query:
 - Each `Filter` becomes a `term` clause in `filter` (exact match, no scoring)
 - Each `Match` becomes a `match` clause in `must` (full-text, scored)
-- An empty `Criteria` matches all documents
+- `Vector` becomes a `knn` clause (k-NN similarity search)
+- When both text matches and vector are present, use OpenSearch hybrid search to blend scores
+- An empty `Criteria` (no filters, matches, or vector) matches all documents
+- `PageSize` and `PageToken` map to OpenSearch `size` and `search_after` — the token is an opaque encoding of the sort values (consistent with the gRPC list RPC pagination pattern using `pkg/pagination`)
 
 Constructor:
 
@@ -100,14 +158,16 @@ func New(address string) (Search, error) {
 
 Conventions:
 - **Interface-first**: `Search` interface is public, implementation struct is private
-- **Typed queries**: callers use `Criteria` with `Filter` and `Match` — never raw JSON. The implementation owns the OpenSearch query DSL translation.
+- **Typed queries**: callers use `Criteria` with `Filter`, `Match`, and `Vector` — never raw JSON. The implementation owns the OpenSearch query DSL translation.
+- **Pagination**: uses `PageSize`/`PageToken` pattern consistent with gRPC list RPCs. Implementation uses OpenSearch `search_after` for efficient deep pagination. Token is an opaque base64-encoded sort value.
+- **Hybrid search**: when `Vector` is set alongside `Matches`, the implementation uses OpenSearch's hybrid query to blend lexical and semantic scores.
 - Constructor returns `(Search, error)` — the error covers connection/config issues
 - Use `opensearchapi` client (v4) — not the legacy v2 client
 - `CreateIndexIfNotExists` accepts `[]byte` (raw embedded JSON), not `string`
 - Logging via `zerolog` context logger on errors
 - **No domain imports**: `pkg/search/` must NOT import `gen/`, `internal/`, or any domain-specific code
 
-### 2. `internal/outbox/<domain>/mappings/` — Embedded JSON mapping files
+### 3. `internal/outbox/<domain>/mappings/` — Embedded JSON mapping files
 
 Mappings are standalone `.json` files loaded via `//go:embed`, following the same pattern as
 `sql/migrations/migrations.go`. This keeps mappings reviewable, lintable, and out of Go code.
@@ -130,13 +190,18 @@ var FS embed.FS
 
 Plain JSON, one file per domain. The file name matches the domain name (not the index name).
 
-The mapping must distinguish between **reference fields** (used for exact-match filtering and lookups)
-and **searchable fields** (used for full-text search). This distinction determines the OpenSearch type:
+The mapping must distinguish between three field categories:
 
 - **Reference fields** → `keyword`: unique identifiers, foreign keys, enum-like values, tags.
-  These are fields users filter or look up by exact value (e.g., find space by key, find content by space_id, filter by tag).
-- **Searchable fields** → `text` with analyzer: human-readable text users search within
-  (e.g., search spaces by name, search content by title or body).
+  These are fields users filter or look up by exact value.
+- **Searchable fields** → `text` with analyzer: human-readable text users search within.
+- **Vector fields** → `knn_vector`: embedding vectors for semantic search. Only include when
+  the entity has text fields worth embedding (e.g., `body`, `description`).
+
+**Denormalization for cross-domain search**: when an entity references a parent (e.g., content → space),
+include the parent's reference fields in the child's mapping so a single query can filter by both
+entity and parent criteria. Name denormalized fields with the parent prefix (e.g., `space_key`,
+`space_name`). This avoids multi-index fan-out queries.
 
 Cross-reference the SQL schema and proto definitions to identify which fields are references
 (unique indexes, foreign keys, enums, arrays of labels) vs. searchable (names, titles, descriptions, bodies).
@@ -145,29 +210,62 @@ Example for a space entity (SQL has: name, key, description, status, visibility)
 
 ```json
 {
+  "settings": {
+    "index": {
+      "knn": true
+    }
+  },
   "mappings": {
     "properties": {
       "key":         { "type": "keyword" },
       "name":        { "type": "text", "analyzer": "standard" },
       "description": { "type": "text", "analyzer": "standard" },
       "status":      { "type": "integer" },
-      "visibility":  { "type": "integer" }
+      "visibility":  { "type": "integer" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1536,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "lucene"
+        }
+      }
     }
   }
 }
 ```
 
-Example for a content entity (SQL has: space_id FK, title, body, status, tags[]):
+Example for a content entity (SQL has: space_id FK, title, body, status, tags[]).
+Note denormalized space fields for cross-domain search:
 
 ```json
 {
+  "settings": {
+    "index": {
+      "knn": true
+    }
+  },
   "mappings": {
     "properties": {
-      "space_id": { "type": "keyword" },
-      "title":    { "type": "text", "analyzer": "standard" },
-      "body":     { "type": "text", "analyzer": "standard" },
-      "status":   { "type": "integer" },
-      "tags":     { "type": "keyword" }
+      "space_id":         { "type": "keyword" },
+      "space_key":        { "type": "keyword" },
+      "space_name":       { "type": "text", "analyzer": "standard" },
+      "space_status":     { "type": "integer" },
+      "space_visibility": { "type": "integer" },
+      "title":            { "type": "text", "analyzer": "standard" },
+      "body":             { "type": "text", "analyzer": "standard" },
+      "status":           { "type": "integer" },
+      "tags":             { "type": "keyword" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1536,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "lucene"
+        }
+      }
     }
   }
 }
@@ -177,37 +275,41 @@ Conventions:
 - File naming: `<domain>.json` (e.g., `space.json`, `content.json`)
 - One file per domain index
 - Pure JSON — no Go string escaping, no backtick literals
-- **Do not index `id`** — OpenSearch uses `_id` (the document ID) natively for lookups by ID. Indexing `id` as a field is redundant.
-- **Do not index `created_at` / `updated_at`** unless the domain requires time-range search. Timestamps are metadata, not reference or search fields.
+- **Do not index `id`** — OpenSearch uses `_id` (the document ID) natively for lookups by ID.
+- **Do not index `created_at` / `updated_at`** unless the domain requires time-range search.
 - **Do not index `deleted_at`** — soft-deleted entities are removed from the index on delete events.
+- **Denormalize parent reference fields** into child documents for cross-domain search. Prefix with parent name (e.g., `space_key`, `space_name`).
+- **Vector field**: use `knn_vector` with `dimension` matching the embedder's output size, `hnsw` method, `cosinesimil` space type, `lucene` engine. Include `"index": { "knn": true }` in settings.
 - Type mapping rules:
   - UUID foreign keys (e.g., `space_id`) → `keyword` (exact-match filter)
   - Unique keys (e.g., space `key`) → `keyword` (exact-match lookup)
   - Enums / integers (e.g., `status`, `visibility`) → `integer` (exact-match filter)
-  - Arrays of labels (e.g., `tags`) → `keyword` (OpenSearch handles arrays natively, each element is a keyword)
-  - Human-readable text (e.g., `name`, `title`, `body`) → `text` with `standard` analyzer (full-text search)
+  - Arrays of labels (e.g., `tags`) → `keyword` (OpenSearch handles arrays natively)
+  - Human-readable text (e.g., `name`, `title`, `body`) → `text` with `standard` analyzer
+  - Embedding vectors → `knn_vector`
   - Booleans → `boolean`
 
-### 3. `internal/outbox/<domain>/index.go` — Index name, mapping, and document struct
+### 4. `internal/outbox/<domain>/index.go` — Index name, mapping, and document struct
 
 All domain-specific search concerns live in the outbox domain package — the index name constant,
 the embedded mapping loader, and the document struct with its mapper from sqlc models.
 
-Example for a space entity:
+For entities with parent references, the document struct includes denormalized parent fields
+and the mapper accepts both the entity and its parent model.
+
+Example for a content entity with denormalized space fields:
 
 ```go
-package space
+package content
 
 import (
-	db<domain> "<module>/gen/db/<domain>"
-	"<module>/internal/outbox/<domain>/mappings"
+	dbcollaboration "<module>/gen/db/collaboration"
+	"<module>/internal/outbox/content/mappings"
 )
 
-// Index name — plural lowercase
-const IndexName = "<domain>s"
+const IndexName = "contents"
 
-// Mapping loaded from embedded JSON
-var IndexMapping = must(mappings.FS.ReadFile("<domain>.json"))
+var IndexMapping = must(mappings.FS.ReadFile("content.json"))
 
 func must(data []byte, err error) []byte {
 	if err != nil {
@@ -216,25 +318,46 @@ func must(data []byte, err error) []byte {
 	return data
 }
 
-// <Domain>Document represents the search document for a <domain>.
-// Fields match the mapping properties in mappings/<domain>.json exactly.
-type <Domain>Document struct {
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Status      int32  `json:"status"`
-	Visibility  int32  `json:"visibility"`
+// EmbeddingField is the mapping field name for the vector embedding.
+const EmbeddingField = "embedding"
+
+// ContentDocument represents the search document for content.
+// Fields match the mapping properties in mappings/content.json exactly.
+type ContentDocument struct {
+	SpaceID         string    `json:"space_id"`
+	SpaceKey        string    `json:"space_key"`
+	SpaceName       string    `json:"space_name"`
+	SpaceStatus     int32     `json:"space_status"`
+	SpaceVisibility int32     `json:"space_visibility"`
+	Title           string    `json:"title"`
+	Body            string    `json:"body"`
+	Status          int32     `json:"status"`
+	Tags            []string  `json:"tags"`
+	Embedding       []float32 `json:"embedding,omitempty"`
 }
 
-// New<Domain>Document maps a sqlc model to a search document.
-func New<Domain>Document(model *db<domain>.<Entity>) <Domain>Document {
-	return <Domain>Document{
-		Key:         model.Key,
-		Name:        model.Name,
-		Description: model.Description,
-		Status:      model.Status,
-		Visibility:  model.Visibility,
+// NewContentDocument maps sqlc models to a search document.
+// Accepts both the content entity and its parent space for denormalization.
+func NewContentDocument(
+	content *dbcollaboration.Content,
+	space *dbcollaboration.Space,
+) ContentDocument {
+	return ContentDocument{
+		SpaceID:         content.SpaceID.String(),
+		SpaceKey:        space.Key,
+		SpaceName:       space.Name,
+		SpaceStatus:     space.Status,
+		SpaceVisibility: space.Visibility,
+		Title:           content.Title,
+		Body:            content.Body,
+		Status:          content.Status,
+		Tags:            content.Tags,
 	}
+}
+
+// EmbeddingText returns the text to embed for this document.
+func (d ContentDocument) EmbeddingText() string {
+	return d.Title + "\n" + d.Body
 }
 ```
 
@@ -242,14 +365,17 @@ Conventions:
 - Index name is plural lowercase: `spaces`, `contents`
 - Mapping loaded from embedded FS at package init — panics on missing file (build-time guarantee)
 - `var` (not `const`) because `[]byte` cannot be a const
-- **Document struct fields = mapping properties**: only include fields that are in the mapping JSON. Do not include `id` (OpenSearch `_id` handles this), `created_at`, `updated_at`, or `deleted_at`.
+- **Document struct fields = mapping properties**: only include fields that are in the mapping JSON.
 - Document struct JSON tags must match the property names in the corresponding `<domain>.json` mapping file exactly
-- UUID foreign keys (e.g., `space_id`) are serialized as strings in the document
-- The `New<Domain>Document` function maps from sqlc model to search document — this is the single source of truth for the mapping
+- **Denormalized fields**: when the entity has a parent FK, the mapper accepts both models and populates parent fields. Prefixed with parent name (e.g., `SpaceKey` → `"space_key"`).
+- **Embedding field**: `[]float32` with `omitempty` — set by the index worker after calling the embedder. The `EmbeddingText()` method returns the text to embed (concatenation of the entity's searchable text fields).
+- **EmbeddingField constant**: exported constant for the mapping field name, used by the index worker when constructing vector queries.
+- UUID foreign keys are serialized as strings in the document
 
-### 4. Update `internal/outbox/<domain>/event_index.go` — Wire index workers to OpenSearch
+### 5. Update `internal/outbox/<domain>/event_index.go` — Wire index workers to OpenSearch
 
-Update the existing index worker to actually index/delete documents via the search client. The worker needs two new dependencies: the search client and the sqlc queries (to re-fetch the entity).
+Update the existing index worker to actually index/delete documents via the search client.
+The worker needs dependencies for search, queries, and the embedder.
 
 **Before** (current placeholder):
 
@@ -263,20 +389,23 @@ type IndexWorker struct {
 
 ```go
 type IndexDependencies struct {
-	Search  search.Search
-	Queries *db<domain>.Queries
+	Search   search.Search
+	Embedder embed.Embedder
+	Queries  *db<domain>.Queries
 }
 
 type IndexWorker struct {
 	river.WorkerDefaults[IndexArgs]
-	search  search.Search
-	queries *db<domain>.Queries
+	search   search.Search
+	embedder embed.Embedder
+	queries  *db<domain>.Queries
 }
 
 func NewIndexWorker(deps IndexDependencies) *IndexWorker {
 	return &IndexWorker{
-		search:  deps.Search,
-		queries: deps.Queries,
+		search:   deps.Search,
+		embedder: deps.Embedder,
+		queries:  deps.Queries,
 	}
 }
 ```
@@ -295,7 +424,18 @@ func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error
 		if err != nil {
 			return err
 		}
-		doc := New<Domain>Document(&entity)
+		// For entities with parent references, also fetch the parent
+		parent, err := w.queries.Get<Parent>(ctx, entity.<Parent>ID)
+		if err != nil {
+			return err
+		}
+		doc := New<Domain>Document(&entity, &parent)
+		// Generate embedding from searchable text fields
+		embedding, err := w.embedder.Embed(ctx, doc.EmbeddingText())
+		if err != nil {
+			return err
+		}
+		doc.Embedding = embedding
 		return w.search.Index(ctx, IndexName, id, doc)
 	case <domain>domain.EventDeleted:
 		return w.search.Delete(ctx, IndexName, id)
@@ -308,27 +448,31 @@ func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error
 
 Key patterns:
 - **Re-fetch from DB**: the worker fetches the current entity state from the database, not from job args — this ensures indexed data is consistent with DB state
-- **Event type switch**: create/update → index, delete → delete from index
-- **Use event constants**: reference domain event constants (e.g., `<domain>domain.EventCreated`) — do NOT hardcode event type strings. Import the domain package for constants only.
-- **Same-package references**: `IndexName`, `New<Domain>Document` come from `index.go` in the same package — no cross-package coupling for domain-specific search types
-- **Delete by ID**: delete events only need the entity ID, no DB fetch needed
+- **Denormalization**: when the entity has a parent FK, the worker fetches both entity and parent to populate denormalized fields
+- **Embedding generation**: the worker calls `embedder.Embed()` with the document's searchable text, then sets the embedding before indexing. This keeps embedding off the request path.
+- **Event type switch**: create/update → embed + index, delete → delete from index
+- **Use event constants**: reference domain event constants (e.g., `<domain>domain.EventCreated`) — do NOT hardcode event type strings.
+- **Same-package references**: `IndexName`, `New<Domain>Document` come from `index.go` in the same package
+- **Delete by ID**: delete events only need the entity ID, no DB fetch or embedding needed
 
-### 5. Update `cmd/server/setup_connections.go` — Add search client and wire dependencies
+### 6. Update `cmd/server/setup_connections.go` — Add search client, embedder, and wire dependencies
 
-Add the search client to the `Connections` struct and initialize it:
+Add the search client and embedder to the `Connections` struct and initialize them:
 
 ```go
 type Connections struct {
 	Pool         *pgxpool.Pool
 	RiverClient  *river.Client[pgx.Tx]
 	SearchClient search.Search
+	Embedder     embed.Embedder
 }
 ```
 
 In `setupConnections`:
 1. Create search client: `search.New(cfg.OpenSearchURL)`
-2. Create indexes on startup: `searchClient.CreateIndexIfNotExists(ctx, <domain>events.IndexName, <domain>events.IndexMapping)`
-3. Pass search client and queries to `NewIndexWorker` when registering workers
+2. Create embedder: `embed.NewOpenSearch(searchClient, cfg.EmbedModelID)` (or other provider)
+3. Create indexes on startup: `searchClient.CreateIndexIfNotExists(ctx, <domain>events.IndexName, <domain>events.IndexMapping)`
+4. Pass search client, embedder, and queries to `NewIndexWorker` when registering workers
 
 Worker registration changes from:
 ```go
@@ -337,25 +481,30 @@ river.AddWorker(workers, &<domain>events.IndexWorker{})
 To:
 ```go
 river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDependencies{
-	Search:  searchClient,
-	Queries: db<domain>.New(pool),
+	Search:   searchClient,
+	Embedder: embedder,
+	Queries:  db<domain>.New(pool),
 }))
 ```
 
-### 6. No changes needed to
+### 7. No changes needed to
 
-- `internal/domain/` — domain layer does not know about search
+- `internal/domain/` — domain layer does not know about search or embeddings
 - `internal/api/` — search is triggered asynchronously via outbox, not synchronously in handlers
 - `pkg/outbox/` — outbox interface is unchanged
 - `internal/outbox/river.go` — event mapping is unchanged (index jobs already created)
 
 ## Conventions
 
-- **Interface-first**: `Search` interface is public, `search` struct is private
-- **Generic `pkg/search/`**: contains only the interface and OpenSearch client — zero domain knowledge
-- **Dependencies struct**: `IndexDependencies` exported, used in constructor
+- **Interface-first**: `Search` and `Embedder` interfaces are public, implementations are private
+- **Generic `pkg/search/` and `pkg/embed/`**: contain only interfaces and clients — zero domain knowledge
+- **Dependencies struct**: `IndexDependencies` exported, includes `Search`, `Embedder`, and `Queries`
 - **Embedded JSON mappings**: mappings live as `.json` files in `internal/outbox/<domain>/mappings/`, loaded via `//go:embed` — never inline JSON in Go code
 - **Domain-specific search types in outbox**: index name, mapping, document struct, and mapper all live in `internal/outbox/<domain>/` alongside the index worker
+- **Denormalization**: child entities include parent reference fields in their search documents to enable single-index cross-domain queries
+- **Embedding in workers**: embedding generation happens in the async River worker, not on the request path
+- **Hybrid search**: `Criteria` supports `Filters`, `Matches`, and `Vector` for combined keyword + semantic search
+- **Pagination**: `Find` returns `*Page` with `NextPageToken`, consistent with gRPC list RPCs
 - **File naming**: `index.go` for index name + mapping + document struct, `event_index.go` for the worker, `mappings/<domain>.json` for mapping definitions
 - **Re-fetch pattern**: index workers always re-fetch from DB for consistency
 - **Startup index creation**: indexes created with `CreateIndexIfNotExists` during server boot
@@ -364,10 +513,11 @@ river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDepen
 ## Layer Rules
 
 - `pkg/search/` depends on nothing domain-specific — purely generic, extractable as a shared module
-- `internal/outbox/<domain>/` depends on: `pkg/search/`, `pkg/outbox`, `gen/db/<domain>`, `internal/domain/<domain>` (for event constants only), river
+- `pkg/embed/` depends on nothing domain-specific — purely generic, provider implementations may depend on opensearch-go
+- `internal/outbox/<domain>/` depends on: `pkg/search/`, `pkg/embed/`, `pkg/outbox`, `gen/db/<domain>`, `internal/domain/<domain>` (for event constants only), river
 - `internal/outbox/<domain>/mappings/` depends on nothing — pure embedded data
-- `internal/domain/` must NOT depend on `pkg/search/`
-- `internal/api/` must NOT depend on `pkg/search/` (search queries will be a separate concern)
+- `internal/domain/` must NOT depend on `pkg/search/` or `pkg/embed/`
+- `internal/api/` must NOT depend on `pkg/search/` or `pkg/embed/` (search queries will be a separate concern)
 
 ## Post-Generation
 
@@ -382,28 +532,37 @@ river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDepen
 
 ## Checklist
 
-- [ ] `pkg/search/search.go` with `Search` interface, private struct, `New()` constructor
+- [ ] `pkg/embed/embed.go` with `Embedder` interface
+- [ ] `pkg/embed/opensearch.go` with OpenSearch ML plugin implementation
+- [ ] `pkg/embed/` has zero imports from `gen/`, `internal/`, or any domain-specific code
+- [ ] `pkg/search/search.go` with `Search` interface, `Criteria`, `Filter`, `Match`, `Vector`, `Page`, `Hit`
+- [ ] `Criteria` includes `PageSize` and `PageToken` for pagination
+- [ ] `Find` returns `*Page` with `NextPageToken` (consistent with gRPC list RPCs)
+- [ ] `Criteria.Vector` supports optional k-NN search
+- [ ] Hybrid search: implementation blends text matches and vector scores when both are present
 - [ ] `pkg/search/` has zero imports from `gen/`, `internal/`, or any domain-specific code
-- [ ] `CreateIndexIfNotExists` accepts `[]byte` (not `string`)
 - [ ] Uses `opensearch-go/v4` client (not legacy v2)
 - [ ] `internal/outbox/<domain>/mappings/mappings.go` with `//go:embed *.json` and exported `FS`
 - [ ] `internal/outbox/<domain>/mappings/<domain>.json` with valid JSON mapping
+- [ ] Mapping includes `knn_vector` field with dimension, hnsw method, cosinesimil, lucene engine
+- [ ] Mapping includes `"settings": { "index": { "knn": true } }`
+- [ ] Child entity mappings include denormalized parent reference fields (prefixed with parent name)
 - [ ] Mapping JSON validates with `jq`
 - [ ] No inline JSON mapping strings in Go code
-- [ ] `internal/outbox/<domain>/index.go` with `IndexName` constant, `IndexMapping` var, document struct, and mapper
+- [ ] `internal/outbox/<domain>/index.go` with `IndexName`, `IndexMapping`, `EmbeddingField`, document struct, mapper, and `EmbeddingText()`
 - [ ] Index name is plural lowercase
-- [ ] Mapping loaded from embedded FS via `mappings.FS.ReadFile()`
-- [ ] Mapping types align with SQL/proto types
+- [ ] Document struct includes denormalized parent fields when entity has a parent FK
+- [ ] Document struct includes `Embedding []float32` with `omitempty`
+- [ ] Mapper for child entities accepts both entity and parent models
+- [ ] `EmbeddingText()` concatenates searchable text fields
 - [ ] Document JSON tags match mapping property names in `<domain>.json` exactly
-- [ ] `New<Domain>Document()` maps from sqlc model to search document
-- [ ] `internal/outbox/<domain>/event_index.go` updated with `IndexDependencies` and `NewIndexWorker`
-- [ ] Index worker re-fetches entity from DB (not from job args)
+- [ ] `internal/outbox/<domain>/event_index.go` updated with `IndexDependencies` including `Embedder`
+- [ ] Index worker calls `embedder.Embed()` before indexing on create/update
+- [ ] Index worker fetches parent entity for denormalization (when applicable)
 - [ ] Index worker uses event type constants from domain package (not hardcoded strings)
-- [ ] Index worker references `IndexName` and `New<Domain>Document` from same package (not from `pkg/search/`)
-- [ ] Create/update events → `search.Index()`, delete events → `search.Delete()`
-- [ ] `setup_connections.go` creates search client and passes to index workers
-- [ ] `setup_connections.go` calls `CreateIndexIfNotExists` on startup using `<domain>events.IndexName` and `<domain>events.IndexMapping`
-- [ ] No imports of `pkg/search/` in `internal/domain/` or `internal/api/`
-- [ ] `go get opensearch-go/v4` added to dependencies
+- [ ] Create/update events → embed + `search.Index()`, delete events → `search.Delete()`
+- [ ] `setup_connections.go` creates search client, embedder, and passes both to index workers
+- [ ] `setup_connections.go` calls `CreateIndexIfNotExists` on startup
+- [ ] No imports of `pkg/search/` or `pkg/embed/` in `internal/domain/` or `internal/api/`
 - [ ] `make vet` passes
 - [ ] `make build` succeeds

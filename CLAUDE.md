@@ -57,6 +57,7 @@ pkg/
 ├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
+├── embed/embed.go           # generic embedder interface (provider-agnostic)
 ├── search/search.go         # generic OpenSearch client interface (no domain knowledge)
 ├── pagination/pagination.go
 ├── migrate/migrate.go
@@ -92,7 +93,7 @@ protos/<domain>/v1/         # .proto files
 
 - `pkg/` depends on nothing — purely generic, extractable as a shared module
 - `internal/domain/` depends on `gen/db/` + `pkg/`
-- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + `pkg/search` + river
+- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + `pkg/search` + `pkg/embed` + river
 - `internal/api/` depends on `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/`
 - `cmd/` wires all layers together
 
