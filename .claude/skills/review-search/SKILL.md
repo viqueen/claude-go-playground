@@ -31,6 +31,7 @@ Identify which project from the PR file paths.
 ### Search Package — `pkg/search/`
 
 - [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `CreateIndexIfNotExists` methods
+- [ ] `Index` and `Delete` accept `uuid.UUID` for the `id` parameter (not `string`)
 - [ ] `CreateIndexIfNotExists` accepts `[]byte` (embedded JSON), not `string`
 - [ ] Implementation struct is private (lowercase)
 - [ ] Constructor `New()` returns `(Search, error)` — interface, not struct
@@ -72,7 +73,7 @@ Identify which project from the PR file paths.
 - [ ] Worker re-fetches entity from DB on create/update (not from job args)
 - [ ] Event type switch uses domain constants (e.g., `<domain>domain.EventCreated`) — no hardcoded strings
 - [ ] Create and update events call `search.Index()` with `IndexName` from same package
-- [ ] Delete events call `search.Delete()` with entity ID only (no DB fetch)
+- [ ] Delete events call `search.Delete()` with parsed `uuid.UUID` (no DB fetch)
 - [ ] References `IndexName` and `New<Domain>Document` from same package (not from `pkg/search/`)
 - [ ] Unknown event types logged as warnings (not errors)
 - [ ] Worker accepts `ctx context.Context` (not `_`)

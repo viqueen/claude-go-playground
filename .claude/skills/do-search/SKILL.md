@@ -38,14 +38,16 @@ package search
 
 import (
 	"context"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 // Search defines the interface for indexing and deleting documents.
 type Search interface {
 	// Index indexes or updates a document in the given index.
-	Index(ctx context.Context, index string, id string, document any) error
+	Index(ctx context.Context, index string, id uuid.UUID, document any) error
 	// Delete removes a document from the given index.
-	Delete(ctx context.Context, index string, id string) error
+	Delete(ctx context.Context, index string, id uuid.UUID) error
 	// CreateIndexIfNotExists ensures an index exists with the given mapping.
 	CreateIndexIfNotExists(ctx context.Context, index string, mapping []byte) error
 }
@@ -215,20 +217,20 @@ The `Work` method references constants and types from the same package (`index.g
 
 ```go
 func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error {
+	id, err := uuid.FromString(job.Args.<Domain>ID)
+	if err != nil {
+		return err
+	}
 	switch job.Args.EventType {
 	case <domain>domain.EventCreated, <domain>domain.EventUpdated:
-		id, err := uuid.FromString(job.Args.<Domain>ID)
-		if err != nil {
-			return err
-		}
 		entity, err := w.queries.Get<Entity>(ctx, id)
 		if err != nil {
 			return err
 		}
 		doc := New<Domain>Document(&entity)
-		return w.search.Index(ctx, IndexName, doc.ID, doc)
+		return w.search.Index(ctx, IndexName, id, doc)
 	case <domain>domain.EventDeleted:
-		return w.search.Delete(ctx, IndexName, job.Args.<Domain>ID)
+		return w.search.Delete(ctx, IndexName, id)
 	default:
 		log.Ctx(ctx).Warn().Str("event_type", job.Args.EventType).Msg("unknown event type")
 		return nil
