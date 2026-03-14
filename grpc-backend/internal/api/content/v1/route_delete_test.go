@@ -1,0 +1,56 @@
+package apicontentv1_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	contentv1 "github.com/viqueen/claude-go-playground/grpc-backend/gen/sdk/content/v1"
+)
+
+func TestDeleteContent_Errors(t *testing.T) {
+	clients, ctx := setupHandler(t)
+
+	t.Run("invalid argument — bad UUID", func(t *testing.T) {
+		t.Parallel()
+		_, err := clients.standard.DeleteContent(ctx, &contentv1.DeleteContentRequest{
+			Id: "not-a-uuid",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+}
+
+func TestDeleteContent_Success(t *testing.T) {
+	tc := setupHandlerWithDB(t)
+
+	t.Run("not found — nonexistent ID", func(t *testing.T) {
+		t.Parallel()
+		_, err := tc.clients.standard.DeleteContent(tc.ctx, &contentv1.DeleteContentRequest{
+			Id: "00000000-0000-0000-0000-000000000001",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.NotFound, status.Code(err))
+	})
+
+	t.Run("deletes existing content", func(t *testing.T) {
+		t.Parallel()
+		spaceID := tc.createSpace(t)
+		created, err := tc.clients.standard.CreateContent(tc.ctx, validCreateRequest(spaceID))
+		require.NoError(t, err)
+
+		_, err = tc.clients.standard.DeleteContent(tc.ctx, &contentv1.DeleteContentRequest{
+			Id: created.Content.Id,
+		})
+		require.NoError(t, err)
+
+		_, err = tc.clients.standard.GetContent(tc.ctx, &contentv1.GetContentRequest{
+			Id: created.Content.Id,
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.NotFound, status.Code(err))
+	})
+}

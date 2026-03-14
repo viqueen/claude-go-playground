@@ -4,7 +4,7 @@ SELECT * FROM collaboration.content WHERE id = sqlc.arg('id') AND deleted_at IS 
 -- name: ListContent :many
 SELECT * FROM collaboration.content
 WHERE deleted_at IS NULL
-ORDER BY created_at LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+ORDER BY created_at, id LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountContent :one
 SELECT count(*) FROM collaboration.content WHERE deleted_at IS NULL;
@@ -12,7 +12,7 @@ SELECT count(*) FROM collaboration.content WHERE deleted_at IS NULL;
 -- name: ListContentBySpace :many
 SELECT * FROM collaboration.content
 WHERE space_id = sqlc.arg('space_id') AND deleted_at IS NULL
-ORDER BY created_at LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+ORDER BY created_at, id LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: CountContentBySpace :one
 SELECT count(*) FROM collaboration.content

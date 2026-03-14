@@ -40,11 +40,15 @@ func toProtoList(models []db.CollaborationContent) []*contentv1.Content {
 }
 
 func fromProtoCreate(req *contentv1.CreateContentRequest) db.CreateContentParams {
+	tags := req.GetTags()
+	if tags == nil {
+		tags = []string{}
+	}
 	return db.CreateContentParams{
 		Title:  req.GetTitle(),
 		Body:   req.GetBody(),
 		Status: int32(req.GetStatus()),
-		Tags:   req.GetTags(),
+		Tags:   tags,
 	}
 }
 

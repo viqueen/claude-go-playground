@@ -152,4 +152,4 @@ Audit an integrate PR. Answer the question: **"Is this wired correctly?"**
 ## PR Context
 
 - PR diff: !`gh pr diff $ARGUMENTS`
-- PR info: !`gh pr view $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS --json number,title,body,state,baseRefName,headRefName,url`

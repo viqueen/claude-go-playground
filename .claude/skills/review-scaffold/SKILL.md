@@ -119,4 +119,4 @@ Audit a scaffold PR. Answer the question: **"Does the structure match our archit
 ## PR Context
 
 - PR diff: !`gh pr diff $ARGUMENTS`
-- PR info: !`gh pr view $ARGUMENTS`
+- PR info: !`gh pr view $ARGUMENTS --json number,title,body,state,baseRefName,headRefName,url`
