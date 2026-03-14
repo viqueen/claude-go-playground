@@ -45,7 +45,8 @@ internal/
 ├── domain/<domain>/        # service, errors, op_<operation>.go
 └── outbox/
     ├── river.go            # River implementation of pkg/outbox.Outbox
-    └── <domain>/           # event_<concern>.go per domain
+    └── <domain>/           # event_<concern>.go per domain, index.go added by /do-search
+        └── mappings/       # //go:embed *.json for OpenSearch index mappings (added by /do-search)
 pkg/
 ├── config/config.go
 ├── connectapp/app.go        # Connect-RPC project only
@@ -56,6 +57,8 @@ pkg/
 ├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
+├── embed/embed.go           # generic embedder interface (added by /do-search)
+├── search/search.go         # generic OpenSearch client interface (added by /do-search)
 ├── pagination/pagination.go
 ├── migrate/migrate.go
 └── testkit/containers.go
@@ -90,7 +93,7 @@ protos/<domain>/v1/         # .proto files
 
 - `pkg/` depends on nothing — purely generic, extractable as a shared module
 - `internal/domain/` depends on `gen/db/` + `pkg/`
-- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + river
+- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + `pkg/search` + `pkg/embed` + river
 - `internal/api/` depends on `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/`
 - `cmd/` wires all layers together
 
@@ -122,6 +125,7 @@ with self-contained instructions (no separate agent files).
 | `/do-proto` | `/do-proto <domain> <project>` | "Is the API contract right?" |
 | `/do-entity-store` | `/do-entity-store <domain> <project>` | "Is the data model right?" |
 | `/do-domain` | `/do-domain <domain> <project>` | "Is the logic correct?" |
+| `/do-search` | `/do-search <domain> <project>` | "Is the search indexing correct?" |
 | `/do-integrate` | `/do-integrate <domain> <project>` | "Is this wired correctly?" |
 | `/do-test` | `/do-test <domain> <project>` | "Is this adequately tested?" |
 
@@ -133,5 +137,6 @@ with self-contained instructions (no separate agent files).
 | `/review-proto` | `/review-proto <pr-number>` | Is the API contract right? |
 | `/review-entity-store` | `/review-entity-store <pr-number>` | Is the data model right? |
 | `/review-domain` | `/review-domain <pr-number>` | Is the logic correct? |
+| `/review-search` | `/review-search <pr-number>` | Is the search indexing correct? |
 | `/review-integrate` | `/review-integrate <pr-number>` | Is this wired correctly? |
 | `/review-test` | `/review-test <pr-number>` | Is this adequately tested? |
