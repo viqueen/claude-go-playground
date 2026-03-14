@@ -31,16 +31,25 @@ Identify which project from the PR file paths.
 ### Search Package — `pkg/search/`
 
 - [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `CreateIndexIfNotExists` methods
+- [ ] `CreateIndexIfNotExists` accepts `[]byte` (embedded JSON), not `string`
 - [ ] Implementation struct is private (lowercase)
 - [ ] Constructor `New()` returns `(Search, error)` — interface, not struct
 - [ ] Uses `opensearch-go/v4` client (`opensearchapi`) — not legacy v2
 - [ ] Error handling logs via `zerolog` and returns meaningful errors
 
-### Index Mapping — `pkg/search/index_<domain>.go`
+### Embedded Mappings — `pkg/search/mappings/`
+
+- [ ] `mappings.go` exists with `//go:embed *.json` and exported `FS embed.FS`
+- [ ] One `<domain>.json` file per domain index
+- [ ] No inline JSON mapping strings anywhere in Go code
+- [ ] Each `.json` file is valid JSON (parseable by `jq`)
+
+### Index Definition — `pkg/search/index_<domain>.go`
 
 - [ ] Index name constant is plural lowercase (e.g., `SpaceIndex = "spaces"`)
-- [ ] Mapping JSON is valid and well-formed
-- [ ] Field types align with SQL schema:
+- [ ] Mapping loaded from embedded FS via `mappings.FS.ReadFile("<domain>.json")`
+- [ ] Mapping is a `var` (not `const`) since it's `[]byte`
+- [ ] Field types in `.json` align with SQL schema:
   - UUID / keyword fields → `keyword`
   - Full-text fields → `text` with appropriate analyzer
   - Enums / integers → `integer`
@@ -75,6 +84,7 @@ Scan all imports:
 
 - [ ] `pkg/search/` imports `gen/db/<domain>` — ALLOWED (for document mapping)
 - [ ] `pkg/search/` imports opensearch-go — ALLOWED
+- [ ] `pkg/search/mappings/` imports nothing — pure embedded data
 - [ ] `internal/outbox/<domain>/` imports `pkg/search/` — ALLOWED
 - [ ] `internal/outbox/<domain>/` imports `gen/db/<domain>` — ALLOWED
 - [ ] `internal/outbox/<domain>/` imports `internal/domain/<domain>` — ALLOWED (for event constants only)
@@ -91,10 +101,11 @@ Scan all imports:
 
 ### Consistency Checks
 
-- [ ] Document struct fields are a subset of the index mapping fields
-- [ ] JSON tags on document struct match mapping property names exactly
+- [ ] Document struct JSON tags match mapping `.json` property names exactly
+- [ ] Document struct fields are a subset of the mapping properties
 - [ ] Index name constant used consistently (worker, setup, mapping — same constant)
 - [ ] No hardcoded index names or mapping JSON outside `pkg/search/`
+- [ ] Mapping `.json` file name matches the domain name used in `index_<domain>.go`
 
 ## Output format
 
@@ -108,7 +119,8 @@ Scan all imports:
 | Component | File | Status | Notes |
 |-----------|------|--------|-------|
 | Search interface | pkg/search/search.go | PASS | — |
-| Index mapping | pkg/search/index_<domain>.go | PASS | — |
+| Embedded mappings | pkg/search/mappings/<domain>.json | PASS | — |
+| Index definition | pkg/search/index_<domain>.go | PASS | — |
 | Document struct | pkg/search/document_<domain>.go | PASS | — |
 | Index worker | internal/outbox/<domain>/event_index.go | PASS | — |
 | Wiring | cmd/server/setup_connections.go | PASS | — |
@@ -117,6 +129,7 @@ Scan all imports:
 | Package | Import | Allowed | Status |
 |---------|--------|---------|--------|
 | pkg/search/ | gen/db/<domain> | yes | PASS |
+| pkg/search/mappings/ | (nothing) | yes | PASS |
 | internal/outbox/<domain>/ | pkg/search/ | yes | PASS |
 | internal/domain/<domain>/ | pkg/search/ | NO | FAIL |
 | ... | ... | ... | ... |
