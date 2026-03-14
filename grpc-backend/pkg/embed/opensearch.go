@@ -7,13 +7,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // NewOpenSearch creates an Embedder backed by OpenSearch's built-in ML plugin.
 // The model must be deployed via the ML commons plugin at _plugins/_ml/models/<modelID>/_predict.
 func NewOpenSearch(address string, modelID string) (Embedder, error) {
+	if address == "" {
+		return nil, fmt.Errorf("embed: address is required")
+	}
+	if modelID == "" {
+		return nil, fmt.Errorf("embed: model ID is required")
+	}
 	return &openSearchEmbedder{
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: 30 * time.Second},
 		address: address,
 		modelID: modelID,
 	}, nil

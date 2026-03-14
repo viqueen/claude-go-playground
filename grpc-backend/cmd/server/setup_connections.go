@@ -72,6 +72,9 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	}
 
 	// Embedder
+	if cfg.EmbedModelID == "" {
+		log.Fatal().Msg("EMBED_MODEL_ID is required for embedding support")
+	}
 	embedder, err := embed.NewOpenSearch(cfg.OpenSearchURL, cfg.EmbedModelID)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create embedder")

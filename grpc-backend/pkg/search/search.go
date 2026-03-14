@@ -101,6 +101,7 @@ func (c *openSearchClient) Index(ctx context.Context, index string, id uuid.UUID
 		log.Ctx(ctx).Error().Err(err).Str("index", index).Str("id", id.String()).Msg("search: index document failed")
 		return fmt.Errorf("search: index document: %w", err)
 	}
+	defer resp.Inspect().Response.Body.Close()
 	if resp.Inspect().Response.StatusCode >= http.StatusBadRequest {
 		respBody, _ := io.ReadAll(resp.Inspect().Response.Body)
 		log.Ctx(ctx).Error().Str("index", index).Str("id", id.String()).Str("response", string(respBody)).Msg("search: index document error response")
@@ -118,6 +119,7 @@ func (c *openSearchClient) Delete(ctx context.Context, index string, id uuid.UUI
 		log.Ctx(ctx).Error().Err(err).Str("index", index).Str("id", id.String()).Msg("search: delete document failed")
 		return fmt.Errorf("search: delete document: %w", err)
 	}
+	defer resp.Inspect().Response.Body.Close()
 	if resp.Inspect().Response.StatusCode >= http.StatusBadRequest {
 		// 404 on delete is acceptable — document may already be gone
 		if resp.Inspect().Response.StatusCode == http.StatusNotFound {
@@ -172,6 +174,11 @@ func (c *openSearchClient) Find(ctx context.Context, index string, criteria Crit
 		log.Ctx(ctx).Error().Err(err).Str("index", index).Msg("search: find failed")
 		return nil, fmt.Errorf("search: find: %w", err)
 	}
+	defer resp.Inspect().Response.Body.Close()
+	if resp.Inspect().Response.StatusCode >= http.StatusBadRequest {
+		respBody, _ := io.ReadAll(resp.Inspect().Response.Body)
+		return nil, fmt.Errorf("search: find: status %d: %s", resp.Inspect().Response.StatusCode, string(respBody))
+	}
 
 	var hits []Hit
 	for _, h := range resp.Hits.Hits {
@@ -188,7 +195,7 @@ func (c *openSearchClient) Find(ctx context.Context, index string, criteria Crit
 	}
 
 	var nextPageToken string
-	if int32(len(hits)) == pageSize && len(resp.Hits.Hits) > 0 {
+	if int32(len(resp.Hits.Hits)) == pageSize {
 		lastHit := resp.Hits.Hits[len(resp.Hits.Hits)-1]
 		if lastHit.Sort != nil {
 			nextPageToken = encodeSearchAfter(lastHit.Sort)
@@ -209,6 +216,7 @@ func (c *openSearchClient) CreateIndexIfNotExists(ctx context.Context, index str
 	if err != nil {
 		return fmt.Errorf("search: check index exists: %w", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		return nil
 	}
@@ -222,6 +230,7 @@ func (c *openSearchClient) CreateIndexIfNotExists(ctx context.Context, index str
 		log.Ctx(ctx).Error().Err(err).Str("index", index).Msg("search: create index failed")
 		return fmt.Errorf("search: create index: %w", err)
 	}
+	defer createResp.Inspect().Response.Body.Close()
 	if createResp.Inspect().Response.StatusCode >= http.StatusBadRequest {
 		respBody, _ := io.ReadAll(createResp.Inspect().Response.Body)
 		// Ignore "resource_already_exists_exception" in case of a race
@@ -251,7 +260,7 @@ func buildQuery(criteria Criteria) map[string]any {
 	}
 
 	// When we have only vector, use knn query
-	if hasVector && !hasMatches {
+	if hasVector {
 		knnField := map[string]any{
 			"vector": criteria.Vector.Values,
 			"k":      criteria.Vector.K,

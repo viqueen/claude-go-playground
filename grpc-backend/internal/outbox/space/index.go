@@ -8,6 +8,9 @@ import (
 // IndexName is the OpenSearch index name for spaces.
 const IndexName = "spaces"
 
+// EmbeddingDimension is the expected vector dimension, matching mappings/space.json.
+const EmbeddingDimension = 1536
+
 // IndexMapping is the OpenSearch mapping for the spaces index.
 var IndexMapping = must(mappings.FS.ReadFile("space.json"))
 
@@ -32,8 +35,8 @@ type SpaceDocument struct {
 	Embedding   []float32 `json:"embedding,omitempty"`
 }
 
-// NewSpaceDocument maps a sqlc CollaborationSpace model to a search document.
-func NewSpaceDocument(entity *db.CollaborationSpace) SpaceDocument {
+// toDocument maps a sqlc CollaborationSpace model to a search document.
+func toDocument(entity *db.CollaborationSpace) SpaceDocument {
 	return SpaceDocument{
 		Key:         entity.Key,
 		Name:        entity.Name,
