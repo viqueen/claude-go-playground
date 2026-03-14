@@ -122,6 +122,7 @@ with self-contained instructions (no separate agent files).
 | `/do-proto` | `/do-proto <domain> <project>` | "Is the API contract right?" |
 | `/do-entity-store` | `/do-entity-store <domain> <project>` | "Is the data model right?" |
 | `/do-domain` | `/do-domain <domain> <project>` | "Is the logic correct?" |
+| `/do-search` | `/do-search <domain> <project>` | "Is the search indexing correct?" |
 | `/do-integrate` | `/do-integrate <domain> <project>` | "Is this wired correctly?" |
 | `/do-test` | `/do-test <domain> <project>` | "Is this adequately tested?" |
 
@@ -133,5 +134,6 @@ with self-contained instructions (no separate agent files).
 | `/review-proto` | `/review-proto <pr-number>` | Is the API contract right? |
 | `/review-entity-store` | `/review-entity-store <pr-number>` | Is the data model right? |
 | `/review-domain` | `/review-domain <pr-number>` | Is the logic correct? |
+| `/review-search` | `/review-search <pr-number>` | Is the search indexing correct? |
 | `/review-integrate` | `/review-integrate <pr-number>` | Is this wired correctly? |
 | `/review-test` | `/review-test <pr-number>` | Is this adequately tested? |
