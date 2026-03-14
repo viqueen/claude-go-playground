@@ -45,8 +45,8 @@ internal/
 ├── domain/<domain>/        # service, errors, op_<operation>.go
 └── outbox/
     ├── river.go            # River implementation of pkg/outbox.Outbox
-    └── <domain>/           # event_<concern>.go, index.go, document.go per domain
-        └── mappings/       # //go:embed *.json for OpenSearch index mappings
+    └── <domain>/           # event_<concern>.go per domain, index.go added by /do-search
+        └── mappings/       # //go:embed *.json for OpenSearch index mappings (added by /do-search)
 pkg/
 ├── config/config.go
 ├── connectapp/app.go        # Connect-RPC project only
@@ -57,8 +57,8 @@ pkg/
 ├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
-├── embed/embed.go           # generic embedder interface (provider-agnostic)
-├── search/search.go         # generic OpenSearch client interface (no domain knowledge)
+├── embed/embed.go           # generic embedder interface (added by /do-search)
+├── search/search.go         # generic OpenSearch client interface (added by /do-search)
 ├── pagination/pagination.go
 ├── migrate/migrate.go
 └── testkit/containers.go

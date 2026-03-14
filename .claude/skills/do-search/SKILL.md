@@ -50,8 +50,9 @@ The provider is chosen at wire time in `cmd/server/`. Implementations live in `p
 
 ```go
 // OpenSearch ML plugin implementation
-func NewOpenSearch(client *opensearchapi.Client, modelID string) Embedder {
-	return &openSearchEmbedder{client: client, modelID: modelID}
+func NewOpenSearch(address string, modelID string) (Embedder, error) {
+	// Creates its own opensearchapi.Client for the ML predict API
+	return &openSearchEmbedder{client: client, modelID: modelID}, nil
 }
 ```
 
@@ -461,9 +462,22 @@ type Connections struct {
 }
 ```
 
+Add `EmbedModelID` to `pkg/config/config.go` if not already present:
+
+```go
+type Config struct {
+	DatabaseURL   string
+	OpenSearchURL string
+	EmbedModelID  string
+	ServerAddr    string
+}
+```
+
+With `EmbedModelID: getEnv("EMBED_MODEL_ID", "")` in `Load()` and `EMBED_MODEL_ID` in `.env`.
+
 In `setupConnections`:
-1. Create search client: `search.New(cfg.OpenSearchURL)`
-2. Create embedder: `embed.NewOpenSearch(searchClient, cfg.EmbedModelID)` (or other provider)
+1. Create search client: `searchClient, err := search.New(cfg.OpenSearchURL)` — this returns the `Search` interface backed by an `opensearchapi.Client`
+2. Create embedder: `embed.NewOpenSearch(cfg.OpenSearchURL, cfg.EmbedModelID)` — creates its own OpenSearch HTTP client for the ML predict API
 3. Create indexes on startup: `searchClient.CreateIndexIfNotExists(ctx, <domain>events.IndexName, <domain>events.IndexMapping)`
 4. Pass search client, embedder, and queries to `NewIndexWorker` when registering workers
 
