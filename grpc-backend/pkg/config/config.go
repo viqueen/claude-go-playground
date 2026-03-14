@@ -9,6 +9,7 @@ import (
 type Config struct {
 	DatabaseURL   string
 	OpenSearchURL string
+	EmbedModelID  string
 	ServerAddr    string
 }
 
@@ -17,6 +18,7 @@ func Load() (*Config, error) {
 	return &Config{
 		DatabaseURL:   getEnv("DATABASE_URL", "postgres://playground:playground@localhost:5432/playground?sslmode=disable"),
 		OpenSearchURL: getEnv("OPENSEARCH_URL", "http://localhost:9200"),
+		EmbedModelID:  getEnv("EMBED_MODEL_ID", ""),
 		ServerAddr:    getEnv("SERVER_ADDR", ":8080"),
 	}, nil
 }

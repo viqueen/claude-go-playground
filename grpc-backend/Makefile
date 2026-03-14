@@ -5,6 +5,7 @@
 codegen:
 	docker build --target generate -t codegen .
 	docker run --rm -v ./gen:/out/gen codegen cp -r /build/gen/. /out/gen/
+	go tool mockery
 
 tidy: codegen
 	go mod tidy

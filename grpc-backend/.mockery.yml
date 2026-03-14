@@ -1,0 +1,26 @@
+all: false
+dir: '{{.InterfaceDir}}/mocks'
+force-file-write: true
+formatter: goimports
+generate: true
+log-level: info
+structname: '{{.InterfaceName}}'
+pkgname: mocks
+recursive: false
+template: testify
+packages:
+  github.com/viqueen/claude-go-playground/grpc-backend/pkg/search:
+    interfaces:
+      Search:
+        config:
+          filename: search.go
+  github.com/viqueen/claude-go-playground/grpc-backend/pkg/embed:
+    interfaces:
+      Embedder:
+        config:
+          filename: embedder.go
+  github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space:
+    interfaces:
+      IndexStore:
+        config:
+          filename: index_store.go
