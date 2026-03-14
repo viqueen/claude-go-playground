@@ -26,9 +26,12 @@ The user will specify:
 
 ## What to generate
 
-### 1. `pkg/search/search.go` — Search client interface and constructor
+### 1. `pkg/search/search.go` — Generic search client interface and constructor
 
 If this is the first domain being indexed, create the shared search package. If it already exists, skip this step.
+
+This package is **purely generic** — no domain-specific types, no imports from `gen/` or `internal/`.
+It is extractable as a shared module, consistent with the `pkg/` layer rule.
 
 ```go
 package search
@@ -65,13 +68,17 @@ Conventions:
 - Use `opensearchapi` client (v4) — not the legacy v2 client
 - `CreateIndexIfNotExists` accepts `[]byte` (raw embedded JSON), not `string`
 - Logging via `zerolog` context logger on errors
+- **No domain imports**: `pkg/search/` must NOT import `gen/`, `internal/`, or any domain-specific code
 
-### 2. `pkg/search/mappings/` — Embedded JSON mapping files
+### 2. `internal/outbox/<domain>/mappings/` — Embedded JSON mapping files
 
 Mappings are standalone `.json` files loaded via `//go:embed`, following the same pattern as
 `sql/migrations/migrations.go`. This keeps mappings reviewable, lintable, and out of Go code.
 
-#### `pkg/search/mappings/mappings.go`
+Domain-specific mappings live under the outbox domain package — not in `pkg/search/` — because
+they are tied to a specific domain's schema and belong in the `internal/` layer.
+
+#### `internal/outbox/<domain>/mappings/mappings.go`
 
 ```go
 package mappings
@@ -82,7 +89,7 @@ import "embed"
 var FS embed.FS
 ```
 
-#### `pkg/search/mappings/<domain>.json` — One JSON file per index
+#### `internal/outbox/<domain>/mappings/<domain>.json` — One JSON file per index
 
 Plain JSON, one file per domain. The file name matches the domain name (not the index name).
 
@@ -112,20 +119,26 @@ Conventions:
   - `TIMESTAMPTZ` → `date`
   - `BOOLEAN` → `boolean`
 
-### 3. `pkg/search/index_<domain>.go` — Index name and mapping loader per domain
+### 3. `internal/outbox/<domain>/index.go` — Index name, mapping, and document struct
 
-One file per domain defining the index name constant and loading the embedded mapping:
+All domain-specific search concerns live in the outbox domain package — the index name constant,
+the embedded mapping loader, and the document struct with its mapper from sqlc models.
 
 ```go
-package search
+package <domain>
 
 import (
-	"<module>/pkg/search/mappings"
+	"time"
+
+	db<domain> "<module>/gen/db/<domain>"
+	"<module>/internal/outbox/<domain>/mappings"
 )
 
-const <Domain>Index = "<domain>s"
+// Index name — plural lowercase
+const IndexName = "<domain>s"
 
-var <Domain>Mapping = must(mappings.FS.ReadFile("<domain>.json"))
+// Mapping loaded from embedded JSON
+var IndexMapping = must(mappings.FS.ReadFile("<domain>.json"))
 
 func must(data []byte, err error) []byte {
 	if err != nil {
@@ -133,25 +146,6 @@ func must(data []byte, err error) []byte {
 	}
 	return data
 }
-```
-
-Note: the `must` helper is defined once and reused across index files. Place it in whichever
-`index_<domain>.go` file is created first, or in a separate `helpers.go` if preferred.
-
-Conventions:
-- Index name is plural lowercase: `spaces`, `contents`
-- Index name constant is exported
-- Mapping loaded from embedded FS at package init — panics on missing file (build-time guarantee)
-- `var` (not `const`) because `[]byte` cannot be a const
-
-### 4. `pkg/search/document_<domain>.go` — Document struct per domain
-
-A plain struct representing the OpenSearch document for this domain. This is what gets serialized to JSON and indexed.
-
-```go
-package search
-
-import "time"
 
 // <Domain>Document represents the search document for a <domain>.
 type <Domain>Document struct {
@@ -161,13 +155,8 @@ type <Domain>Document struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-```
 
-Include a mapping function from the sqlc model:
-
-```go
-import db<domain> "<module>/gen/db/<domain>"
-
+// New<Domain>Document maps a sqlc model to a search document.
 func New<Domain>Document(model *db<domain>.<Entity>) <Domain>Document {
 	return <Domain>Document{
 		ID:        model.ID.String(),
@@ -180,12 +169,15 @@ func New<Domain>Document(model *db<domain>.<Entity>) <Domain>Document {
 ```
 
 Conventions:
+- Index name is plural lowercase: `spaces`, `contents`
+- Mapping loaded from embedded FS at package init — panics on missing file (build-time guarantee)
+- `var` (not `const`) because `[]byte` cannot be a const
 - Document struct JSON tags must match the property names in the corresponding `<domain>.json` mapping file exactly
 - UUIDs are serialized as strings
 - Timestamps use `time.Time` (serialized as ISO 8601 by default — compatible with OpenSearch `date` type)
 - The `New<Domain>Document` function maps from sqlc model to search document — this is the single source of truth for the mapping
 
-### 5. Update `internal/outbox/<domain>/event_index.go` — Wire index workers to OpenSearch
+### 4. Update `internal/outbox/<domain>/event_index.go` — Wire index workers to OpenSearch
 
 Update the existing index worker to actually index/delete documents via the search client. The worker needs two new dependencies: the search client and the sqlc queries (to re-fetch the entity).
 
@@ -219,12 +211,12 @@ func NewIndexWorker(deps IndexDependencies) *IndexWorker {
 }
 ```
 
-The `Work` method:
+The `Work` method references constants and types from the same package (`index.go`):
 
 ```go
 func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error {
 	switch job.Args.EventType {
-	case "<domain>.created", "<domain>.updated":
+	case <domain>domain.EventCreated, <domain>domain.EventUpdated:
 		id, err := uuid.FromString(job.Args.<Domain>ID)
 		if err != nil {
 			return err
@@ -233,10 +225,10 @@ func (w *IndexWorker) Work(ctx context.Context, job *river.Job[IndexArgs]) error
 		if err != nil {
 			return err
 		}
-		doc := search.New<Domain>Document(&entity)
-		return w.search.Index(ctx, search.<Domain>Index, doc.ID, doc)
-	case "<domain>.deleted":
-		return w.search.Delete(ctx, search.<Domain>Index, job.Args.<Domain>ID)
+		doc := New<Domain>Document(&entity)
+		return w.search.Index(ctx, IndexName, doc.ID, doc)
+	case <domain>domain.EventDeleted:
+		return w.search.Delete(ctx, IndexName, job.Args.<Domain>ID)
 	default:
 		log.Ctx(ctx).Warn().Str("event_type", job.Args.EventType).Msg("unknown event type")
 		return nil
@@ -248,9 +240,10 @@ Key patterns:
 - **Re-fetch from DB**: the worker fetches the current entity state from the database, not from job args — this ensures indexed data is consistent with DB state
 - **Event type switch**: create/update → index, delete → delete from index
 - **Use event constants**: reference domain event constants (e.g., `<domain>domain.EventCreated`) — do NOT hardcode event type strings. Import the domain package for constants only.
+- **Same-package references**: `IndexName`, `New<Domain>Document` come from `index.go` in the same package — no cross-package coupling for domain-specific search types
 - **Delete by ID**: delete events only need the entity ID, no DB fetch needed
 
-### 6. Update `cmd/server/setup_connections.go` — Add search client and wire dependencies
+### 5. Update `cmd/server/setup_connections.go` — Add search client and wire dependencies
 
 Add the search client to the `Connections` struct and initialize it:
 
@@ -264,7 +257,7 @@ type Connections struct {
 
 In `setupConnections`:
 1. Create search client: `search.New(cfg.OpenSearchURL)`
-2. Create indexes on startup: `searchClient.CreateIndexIfNotExists(ctx, search.<Domain>Index, search.<Domain>Mapping)`
+2. Create indexes on startup: `searchClient.CreateIndexIfNotExists(ctx, <domain>events.IndexName, <domain>events.IndexMapping)`
 3. Pass search client and queries to `NewIndexWorker` when registering workers
 
 Worker registration changes from:
@@ -279,7 +272,7 @@ river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDepen
 }))
 ```
 
-### 7. No changes needed to
+### 6. No changes needed to
 
 - `internal/domain/` — domain layer does not know about search
 - `internal/api/` — search is triggered asynchronously via outbox, not synchronously in handlers
@@ -289,25 +282,27 @@ river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDepen
 ## Conventions
 
 - **Interface-first**: `Search` interface is public, `search` struct is private
+- **Generic `pkg/search/`**: contains only the interface and OpenSearch client — zero domain knowledge
 - **Dependencies struct**: `IndexDependencies` exported, used in constructor
-- **Embedded JSON mappings**: mappings live as `.json` files in `pkg/search/mappings/`, loaded via `//go:embed` — never inline JSON in Go code
-- **File naming**: `index_<domain>.go` for index constants + mapping loader, `document_<domain>.go` for document structs, `mappings/<domain>.json` for mapping definitions
+- **Embedded JSON mappings**: mappings live as `.json` files in `internal/outbox/<domain>/mappings/`, loaded via `//go:embed` — never inline JSON in Go code
+- **Domain-specific search types in outbox**: index name, mapping, document struct, and mapper all live in `internal/outbox/<domain>/` alongside the index worker
+- **File naming**: `index.go` for index name + mapping + document struct, `event_index.go` for the worker, `mappings/<domain>.json` for mapping definitions
 - **Re-fetch pattern**: index workers always re-fetch from DB for consistency
 - **Startup index creation**: indexes created with `CreateIndexIfNotExists` during server boot
 - **No search in domain layer**: domain emits events, outbox workers handle indexing — clean separation
 
 ## Layer Rules
 
-- `pkg/search/` depends on: `gen/db/<domain>` (for document mapping only), opensearch-go client
-- `pkg/search/mappings/` depends on nothing — pure embedded data
-- `internal/outbox/<domain>/` can now additionally depend on: `pkg/search/`, `gen/db/<domain>`
+- `pkg/search/` depends on nothing domain-specific — purely generic, extractable as a shared module
+- `internal/outbox/<domain>/` depends on: `pkg/search/`, `pkg/outbox`, `gen/db/<domain>`, `internal/domain/<domain>` (for event constants only), river
+- `internal/outbox/<domain>/mappings/` depends on nothing — pure embedded data
 - `internal/domain/` must NOT depend on `pkg/search/`
 - `internal/api/` must NOT depend on `pkg/search/` (search queries will be a separate concern)
 
 ## Post-Generation
 
 1. Run `go get github.com/opensearch-project/opensearch-go/v4` from the project root
-2. Validate mappings: `for f in pkg/search/mappings/*.json; do jq . "$f" > /dev/null || echo "INVALID: $f"; done`
+2. Validate mappings: `for f in internal/outbox/<domain>/mappings/*.json; do jq . "$f" > /dev/null || echo "INVALID: $f"; done`
 3. Run `make vet` — fix all compilation errors
 4. Run `make build` — confirm Docker build works
 5. Run `make infra` — start infrastructure (OpenSearch must be healthy)
@@ -318,23 +313,26 @@ river.AddWorker(workers, <domain>events.NewIndexWorker(<domain>events.IndexDepen
 ## Checklist
 
 - [ ] `pkg/search/search.go` with `Search` interface, private struct, `New()` constructor
+- [ ] `pkg/search/` has zero imports from `gen/`, `internal/`, or any domain-specific code
 - [ ] `CreateIndexIfNotExists` accepts `[]byte` (not `string`)
 - [ ] Uses `opensearch-go/v4` client (not legacy v2)
-- [ ] `pkg/search/mappings/mappings.go` with `//go:embed *.json` and exported `FS`
-- [ ] `pkg/search/mappings/<domain>.json` with valid JSON mapping
+- [ ] `internal/outbox/<domain>/mappings/mappings.go` with `//go:embed *.json` and exported `FS`
+- [ ] `internal/outbox/<domain>/mappings/<domain>.json` with valid JSON mapping
 - [ ] Mapping JSON validates with `jq`
 - [ ] No inline JSON mapping strings in Go code
-- [ ] `pkg/search/index_<domain>.go` with index name constant and `var <Domain>Mapping` loaded from embedded FS
+- [ ] `internal/outbox/<domain>/index.go` with `IndexName` constant, `IndexMapping` var, document struct, and mapper
 - [ ] Index name is plural lowercase
+- [ ] Mapping loaded from embedded FS via `mappings.FS.ReadFile()`
 - [ ] Mapping types align with SQL/proto types
-- [ ] `pkg/search/document_<domain>.go` with document struct and `New<Domain>Document()` mapper
 - [ ] Document JSON tags match mapping property names in `<domain>.json` exactly
+- [ ] `New<Domain>Document()` maps from sqlc model to search document
 - [ ] `internal/outbox/<domain>/event_index.go` updated with `IndexDependencies` and `NewIndexWorker`
 - [ ] Index worker re-fetches entity from DB (not from job args)
 - [ ] Index worker uses event type constants from domain package (not hardcoded strings)
+- [ ] Index worker references `IndexName` and `New<Domain>Document` from same package (not from `pkg/search/`)
 - [ ] Create/update events → `search.Index()`, delete events → `search.Delete()`
 - [ ] `setup_connections.go` creates search client and passes to index workers
-- [ ] `setup_connections.go` calls `CreateIndexIfNotExists` on startup for each domain index
+- [ ] `setup_connections.go` calls `CreateIndexIfNotExists` on startup using `<domain>events.IndexName` and `<domain>events.IndexMapping`
 - [ ] No imports of `pkg/search/` in `internal/domain/` or `internal/api/`
 - [ ] `go get opensearch-go/v4` added to dependencies
 - [ ] `make vet` passes

@@ -36,19 +36,25 @@ Identify which project from the PR file paths.
 - [ ] Constructor `New()` returns `(Search, error)` — interface, not struct
 - [ ] Uses `opensearch-go/v4` client (`opensearchapi`) — not legacy v2
 - [ ] Error handling logs via `zerolog` and returns meaningful errors
+- [ ] **No domain imports**: `pkg/search/` must NOT import `gen/`, `internal/`, or any domain-specific code
 
-### Embedded Mappings — `pkg/search/mappings/`
+### Embedded Mappings — `internal/outbox/<domain>/mappings/`
 
 - [ ] `mappings.go` exists with `//go:embed *.json` and exported `FS embed.FS`
 - [ ] One `<domain>.json` file per domain index
 - [ ] No inline JSON mapping strings anywhere in Go code
 - [ ] Each `.json` file is valid JSON (parseable by `jq`)
+- [ ] Mappings live under `internal/outbox/<domain>/` (not under `pkg/search/`)
 
-### Index Definition — `pkg/search/index_<domain>.go`
+### Index Definition & Document — `internal/outbox/<domain>/index.go`
 
-- [ ] Index name constant is plural lowercase (e.g., `SpaceIndex = "spaces"`)
-- [ ] Mapping loaded from embedded FS via `mappings.FS.ReadFile("<domain>.json")`
+- [ ] `IndexName` constant is plural lowercase (e.g., `"spaces"`)
+- [ ] `IndexMapping` loaded from embedded FS via `mappings.FS.ReadFile("<domain>.json")`
 - [ ] Mapping is a `var` (not `const`) since it's `[]byte`
+- [ ] Document struct defined in same package with JSON tags
+- [ ] `New<Domain>Document()` mapper converts sqlc model to document struct
+- [ ] UUIDs serialized as strings
+- [ ] Timestamps use `time.Time` (ISO 8601 compatible with OpenSearch `date` type)
 - [ ] Field types in `.json` align with SQL schema:
   - UUID / keyword fields → `keyword`
   - Full-text fields → `text` with appropriate analyzer
@@ -59,22 +65,15 @@ Identify which project from the PR file paths.
 - [ ] All searchable fields from the entity are included in the mapping
 - [ ] No unnecessary fields indexed (e.g., `deleted_at` should not be indexed)
 
-### Document Struct — `pkg/search/document_<domain>.go`
-
-- [ ] Document struct fields match mapping field names via JSON tags
-- [ ] `New<Domain>Document()` mapper correctly converts sqlc model to document
-- [ ] UUIDs serialized as strings
-- [ ] Timestamps use `time.Time` (ISO 8601 compatible with OpenSearch `date` type)
-- [ ] No fields included that aren't in the mapping
-
 ### Index Worker — `internal/outbox/<domain>/event_index.go`
 
 - [ ] `IndexDependencies` struct is exported with `Search` and `Queries` fields
 - [ ] `NewIndexWorker()` constructor takes `IndexDependencies`
 - [ ] Worker re-fetches entity from DB on create/update (not from job args)
 - [ ] Event type switch uses domain constants (e.g., `<domain>domain.EventCreated`) — no hardcoded strings
-- [ ] Create and update events call `search.Index()`
+- [ ] Create and update events call `search.Index()` with `IndexName` from same package
 - [ ] Delete events call `search.Delete()` with entity ID only (no DB fetch)
+- [ ] References `IndexName` and `New<Domain>Document` from same package (not from `pkg/search/`)
 - [ ] Unknown event types logged as warnings (not errors)
 - [ ] Worker accepts `ctx context.Context` (not `_`)
 
@@ -82,9 +81,8 @@ Identify which project from the PR file paths.
 
 Scan all imports:
 
-- [ ] `pkg/search/` imports `gen/db/<domain>` — ALLOWED (for document mapping)
-- [ ] `pkg/search/` imports opensearch-go — ALLOWED
-- [ ] `pkg/search/mappings/` imports nothing — pure embedded data
+- [ ] `pkg/search/` imports ONLY standard library + opensearch-go + zerolog — no `gen/`, no `internal/`
+- [ ] `internal/outbox/<domain>/mappings/` imports nothing — pure embedded data
 - [ ] `internal/outbox/<domain>/` imports `pkg/search/` — ALLOWED
 - [ ] `internal/outbox/<domain>/` imports `gen/db/<domain>` — ALLOWED
 - [ ] `internal/outbox/<domain>/` imports `internal/domain/<domain>` — ALLOWED (for event constants only)
@@ -95,7 +93,7 @@ Scan all imports:
 
 - [ ] `Connections` struct includes `SearchClient search.Search`
 - [ ] Search client created with `search.New(cfg.OpenSearchURL)`
-- [ ] `CreateIndexIfNotExists` called on startup for each domain index
+- [ ] `CreateIndexIfNotExists` called on startup using `<domain>events.IndexName` and `<domain>events.IndexMapping`
 - [ ] Index workers created via `NewIndexWorker` with dependencies (not zero-value struct)
 - [ ] Search client and queries both passed to index worker
 
@@ -103,9 +101,10 @@ Scan all imports:
 
 - [ ] Document struct JSON tags match mapping `.json` property names exactly
 - [ ] Document struct fields are a subset of the mapping properties
-- [ ] Index name constant used consistently (worker, setup, mapping — same constant)
-- [ ] No hardcoded index names or mapping JSON outside `pkg/search/`
-- [ ] Mapping `.json` file name matches the domain name used in `index_<domain>.go`
+- [ ] `IndexName` constant used consistently (worker, setup — same constant from same package)
+- [ ] No hardcoded index names or mapping JSON outside `internal/outbox/<domain>/`
+- [ ] Mapping `.json` file name matches the domain name used in `index.go`
+- [ ] No domain-specific types or imports leaked into `pkg/search/`
 
 ## Output format
 
@@ -119,18 +118,18 @@ Scan all imports:
 | Component | File | Status | Notes |
 |-----------|------|--------|-------|
 | Search interface | pkg/search/search.go | PASS | — |
-| Embedded mappings | pkg/search/mappings/<domain>.json | PASS | — |
-| Index definition | pkg/search/index_<domain>.go | PASS | — |
-| Document struct | pkg/search/document_<domain>.go | PASS | — |
+| Embedded mappings | internal/outbox/<domain>/mappings/<domain>.json | PASS | — |
+| Index + document | internal/outbox/<domain>/index.go | PASS | — |
 | Index worker | internal/outbox/<domain>/event_index.go | PASS | — |
 | Wiring | cmd/server/setup_connections.go | PASS | — |
 
 ### Import Audit
 | Package | Import | Allowed | Status |
 |---------|--------|---------|--------|
-| pkg/search/ | gen/db/<domain> | yes | PASS |
-| pkg/search/mappings/ | (nothing) | yes | PASS |
+| pkg/search/ | opensearch-go | yes | PASS |
+| pkg/search/ | gen/db/<domain> | NO | FAIL |
 | internal/outbox/<domain>/ | pkg/search/ | yes | PASS |
+| internal/outbox/<domain>/ | gen/db/<domain> | yes | PASS |
 | internal/domain/<domain>/ | pkg/search/ | NO | FAIL |
 | ... | ... | ... | ... |
 

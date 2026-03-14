@@ -45,7 +45,8 @@ internal/
 ├── domain/<domain>/        # service, errors, op_<operation>.go
 └── outbox/
     ├── river.go            # River implementation of pkg/outbox.Outbox
-    └── <domain>/           # event_<concern>.go per domain
+    └── <domain>/           # event_<concern>.go, index.go, document.go per domain
+        └── mappings/       # //go:embed *.json for OpenSearch index mappings
 pkg/
 ├── config/config.go
 ├── connectapp/app.go        # Connect-RPC project only
@@ -56,6 +57,7 @@ pkg/
 ├── grpcutil/interceptors.go # gRPC project only
 ├── cache/cache.go
 ├── outbox/outbox.go
+├── search/search.go         # generic OpenSearch client interface (no domain knowledge)
 ├── pagination/pagination.go
 ├── migrate/migrate.go
 └── testkit/containers.go
@@ -90,7 +92,7 @@ protos/<domain>/v1/         # .proto files
 
 - `pkg/` depends on nothing — purely generic, extractable as a shared module
 - `internal/domain/` depends on `gen/db/` + `pkg/`
-- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + river
+- `internal/outbox/` depends on `gen/db/` + `pkg/outbox` + `pkg/search` + river
 - `internal/api/` depends on `internal/domain/`, `gen/sdk/`, `gen/db/`, `pkg/`
 - `cmd/` wires all layers together
 
