@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "index": {
+      "knn": true
+    }
+  },
+  "mappings": {
+    "properties": {
+      "key": { "type": "keyword" },
+      "name": { "type": "text", "analyzer": "standard" },
+      "description": { "type": "text", "analyzer": "standard" },
+      "status": { "type": "integer" },
+      "visibility": { "type": "integer" },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1536,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "lucene"
+        }
+      }
+    }
+  }
+}

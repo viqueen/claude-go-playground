@@ -14,16 +14,21 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	db "github.com/viqueen/claude-go-playground/grpc-backend/gen/db/collaboration"
 	contentevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/content"
 	spaceevents "github.com/viqueen/claude-go-playground/grpc-backend/internal/outbox/space"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/config"
+	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/embed"
 	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/migrate"
+	"github.com/viqueen/claude-go-playground/grpc-backend/pkg/search"
 	migrations "github.com/viqueen/claude-go-playground/grpc-backend/sql/migrations"
 )
 
 type Connections struct {
-	Pool        *pgxpool.Pool
-	RiverClient *river.Client[pgx.Tx]
+	Pool         *pgxpool.Pool
+	RiverClient  *river.Client[pgx.Tx]
+	SearchClient search.Search
+	Embedder     embed.Embedder
 }
 
 func (c *Connections) Close() {
@@ -60,9 +65,31 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 	}
 	stdDB.Close()
 
+	// Search client
+	searchClient, err := search.New(cfg.OpenSearchURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create search client")
+	}
+
+	// Embedder
+	embedder, err := embed.NewOpenSearch(cfg.OpenSearchURL, cfg.EmbedModelID)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create embedder")
+	}
+
+	// Create indexes on startup
+	if err := searchClient.CreateIndexIfNotExists(ctx, spaceevents.IndexName, spaceevents.IndexMapping); err != nil {
+		log.Fatal().Err(err).Msg("failed to create spaces index")
+	}
+
 	// River client with domain workers
+	queries := db.New(pool)
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &spaceevents.IndexWorker{})
+	river.AddWorker(workers, spaceevents.NewIndexWorker(spaceevents.IndexDependencies{
+		Search:   searchClient,
+		Embedder: embedder,
+		Queries:  queries,
+	}))
 	river.AddWorker(workers, &spaceevents.AuditWorker{})
 	river.AddWorker(workers, &contentevents.IndexWorker{})
 	river.AddWorker(workers, &contentevents.AuditWorker{})
@@ -78,5 +105,10 @@ func setupConnections(ctx context.Context, cfg *config.Config) *Connections {
 		log.Fatal().Err(err).Msg("failed to start river client")
 	}
 
-	return &Connections{Pool: pool, RiverClient: riverClient}
+	return &Connections{
+		Pool:         pool,
+		RiverClient:  riverClient,
+		SearchClient: searchClient,
+		Embedder:     embedder,
+	}
 }
