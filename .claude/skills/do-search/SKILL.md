@@ -198,15 +198,15 @@ The mapping must distinguish between three field categories:
 - **Vector fields** → `knn_vector`: embedding vectors for semantic search. Only include when
   the entity has text fields worth embedding (e.g., `body`, `description`).
 
-**Denormalization for cross-domain search**: when an entity references a parent (e.g., content → space),
+**Denormalization for cross-domain search**: when an entity references a parent via FK,
 include the parent's reference fields in the child's mapping so a single query can filter by both
-entity and parent criteria. Name denormalized fields with the parent prefix (e.g., `space_key`,
-`space_name`). This avoids multi-index fan-out queries.
+entity and parent criteria. Name denormalized fields with the parent prefix (e.g., `<parent>_<field>`).
+This avoids multi-index fan-out queries.
 
 Cross-reference the SQL schema and proto definitions to identify which fields are references
 (unique indexes, foreign keys, enums, arrays of labels) vs. searchable (names, titles, descriptions, bodies).
 
-Example for a space entity (SQL has: name, key, description, status, visibility):
+Example for a root entity (no parent FK):
 
 ```json
 {
@@ -217,11 +217,10 @@ Example for a space entity (SQL has: name, key, description, status, visibility)
   },
   "mappings": {
     "properties": {
-      "key":         { "type": "keyword" },
-      "name":        { "type": "text", "analyzer": "standard" },
-      "description": { "type": "text", "analyzer": "standard" },
-      "status":      { "type": "integer" },
-      "visibility":  { "type": "integer" },
+      "<unique_key>":  { "type": "keyword" },
+      "<name_field>":  { "type": "text", "analyzer": "standard" },
+      "<text_field>":  { "type": "text", "analyzer": "standard" },
+      "<enum_field>":  { "type": "integer" },
       "embedding": {
         "type": "knn_vector",
         "dimension": 1536,
@@ -236,8 +235,8 @@ Example for a space entity (SQL has: name, key, description, status, visibility)
 }
 ```
 
-Example for a content entity (SQL has: space_id FK, title, body, status, tags[]).
-Note denormalized space fields for cross-domain search:
+Example for a child entity (has parent FK).
+Note denormalized parent fields for cross-domain search:
 
 ```json
 {
@@ -248,15 +247,14 @@ Note denormalized space fields for cross-domain search:
   },
   "mappings": {
     "properties": {
-      "space_id":         { "type": "keyword" },
-      "space_key":        { "type": "keyword" },
-      "space_name":       { "type": "text", "analyzer": "standard" },
-      "space_status":     { "type": "integer" },
-      "space_visibility": { "type": "integer" },
-      "title":            { "type": "text", "analyzer": "standard" },
-      "body":             { "type": "text", "analyzer": "standard" },
-      "status":           { "type": "integer" },
-      "tags":             { "type": "keyword" },
+      "<parent>_id":         { "type": "keyword" },
+      "<parent>_<ref_field>": { "type": "keyword" },
+      "<parent>_<text_field>": { "type": "text", "analyzer": "standard" },
+      "<parent>_<enum_field>": { "type": "integer" },
+      "<name_field>":        { "type": "text", "analyzer": "standard" },
+      "<text_field>":        { "type": "text", "analyzer": "standard" },
+      "<enum_field>":        { "type": "integer" },
+      "<array_field>":       { "type": "keyword" },
       "embedding": {
         "type": "knn_vector",
         "dimension": 1536,
@@ -272,20 +270,20 @@ Note denormalized space fields for cross-domain search:
 ```
 
 Conventions:
-- File naming: `<domain>.json` (e.g., `space.json`, `content.json`)
+- File naming: `<domain>.json`
 - One file per domain index
 - Pure JSON — no Go string escaping, no backtick literals
 - **Do not index `id`** — OpenSearch uses `_id` (the document ID) natively for lookups by ID.
 - **Do not index `created_at` / `updated_at`** unless the domain requires time-range search.
 - **Do not index `deleted_at`** — soft-deleted entities are removed from the index on delete events.
-- **Denormalize parent reference fields** into child documents for cross-domain search. Prefix with parent name (e.g., `space_key`, `space_name`).
+- **Denormalize parent reference fields** into child documents for cross-domain search. Prefix with parent name (`<parent>_<field>`).
 - **Vector field**: use `knn_vector` with `dimension` matching the embedder's output size, `hnsw` method, `cosinesimil` space type, `lucene` engine. Include `"index": { "knn": true }` in settings.
 - Type mapping rules:
-  - UUID foreign keys (e.g., `space_id`) → `keyword` (exact-match filter)
-  - Unique keys (e.g., space `key`) → `keyword` (exact-match lookup)
-  - Enums / integers (e.g., `status`, `visibility`) → `integer` (exact-match filter)
-  - Arrays of labels (e.g., `tags`) → `keyword` (OpenSearch handles arrays natively)
-  - Human-readable text (e.g., `name`, `title`, `body`) → `text` with `standard` analyzer
+  - UUID foreign keys → `keyword` (exact-match filter)
+  - Unique keys → `keyword` (exact-match lookup)
+  - Enums / integers → `integer` (exact-match filter)
+  - Arrays of labels → `keyword` (OpenSearch handles arrays natively)
+  - Human-readable text → `text` with `standard` analyzer
   - Embedding vectors → `knn_vector`
   - Booleans → `boolean`
 
@@ -297,19 +295,19 @@ the embedded mapping loader, and the document struct with its mapper from sqlc m
 For entities with parent references, the document struct includes denormalized parent fields
 and the mapper accepts both the entity and its parent model.
 
-Example for a content entity with denormalized space fields:
-
 ```go
-package content
+package <domain>
 
 import (
-	dbcollaboration "<module>/gen/db/collaboration"
-	"<module>/internal/outbox/content/mappings"
+	db<schema> "<module>/gen/db/<schema>"
+	"<module>/internal/outbox/<domain>/mappings"
 )
 
-const IndexName = "contents"
+// Index name — plural lowercase
+const IndexName = "<domain>s"
 
-var IndexMapping = must(mappings.FS.ReadFile("content.json"))
+// Mapping loaded from embedded JSON
+var IndexMapping = must(mappings.FS.ReadFile("<domain>.json"))
 
 func must(data []byte, err error) []byte {
 	if err != nil {
@@ -321,53 +319,48 @@ func must(data []byte, err error) []byte {
 // EmbeddingField is the mapping field name for the vector embedding.
 const EmbeddingField = "embedding"
 
-// ContentDocument represents the search document for content.
-// Fields match the mapping properties in mappings/content.json exactly.
-type ContentDocument struct {
-	SpaceID         string    `json:"space_id"`
-	SpaceKey        string    `json:"space_key"`
-	SpaceName       string    `json:"space_name"`
-	SpaceStatus     int32     `json:"space_status"`
-	SpaceVisibility int32     `json:"space_visibility"`
-	Title           string    `json:"title"`
-	Body            string    `json:"body"`
-	Status          int32     `json:"status"`
-	Tags            []string  `json:"tags"`
-	Embedding       []float32 `json:"embedding,omitempty"`
+// <Domain>Document represents the search document for a <domain>.
+// Fields match the mapping properties in mappings/<domain>.json exactly.
+type <Domain>Document struct {
+	// Denormalized parent fields (only when entity has a parent FK)
+	<Parent>ID       string `json:"<parent>_id"`
+	<Parent><Field>  string `json:"<parent>_<field>"`
+	// Entity's own fields
+	<Field>   string    `json:"<field>"`
+	<Enum>    int32     `json:"<enum>"`
+	<Array>   []string  `json:"<array>"`
+	Embedding []float32 `json:"embedding,omitempty"`
 }
 
-// NewContentDocument maps sqlc models to a search document.
-// Accepts both the content entity and its parent space for denormalization.
-func NewContentDocument(
-	content *dbcollaboration.Content,
-	space *dbcollaboration.Space,
-) ContentDocument {
-	return ContentDocument{
-		SpaceID:         content.SpaceID.String(),
-		SpaceKey:        space.Key,
-		SpaceName:       space.Name,
-		SpaceStatus:     space.Status,
-		SpaceVisibility: space.Visibility,
-		Title:           content.Title,
-		Body:            content.Body,
-		Status:          content.Status,
-		Tags:            content.Tags,
+// New<Domain>Document maps sqlc models to a search document.
+// When the entity has a parent FK, accepts both the entity and its parent.
+func New<Domain>Document(
+	entity *db<schema>.<Entity>,
+	parent *db<schema>.<Parent>,  // omit if no parent FK
+) <Domain>Document {
+	return <Domain>Document{
+		<Parent>ID:      entity.<Parent>ID.String(),
+		<Parent><Field>: parent.<Field>,
+		<Field>:         entity.<Field>,
+		<Enum>:          entity.<Enum>,
+		<Array>:         entity.<Array>,
 	}
 }
 
 // EmbeddingText returns the text to embed for this document.
-func (d ContentDocument) EmbeddingText() string {
-	return d.Title + "\n" + d.Body
+// Concatenate the entity's searchable text fields.
+func (d <Domain>Document) EmbeddingText() string {
+	return d.<TextField1> + "\n" + d.<TextField2>
 }
 ```
 
 Conventions:
-- Index name is plural lowercase: `spaces`, `contents`
+- Index name is plural lowercase: `<domain>s`
 - Mapping loaded from embedded FS at package init — panics on missing file (build-time guarantee)
 - `var` (not `const`) because `[]byte` cannot be a const
 - **Document struct fields = mapping properties**: only include fields that are in the mapping JSON.
 - Document struct JSON tags must match the property names in the corresponding `<domain>.json` mapping file exactly
-- **Denormalized fields**: when the entity has a parent FK, the mapper accepts both models and populates parent fields. Prefixed with parent name (e.g., `SpaceKey` → `"space_key"`).
+- **Denormalized fields**: when the entity has a parent FK, the mapper accepts both models and populates parent fields. Prefixed with parent name (`<Parent><Field>` → `"<parent>_<field>"`).
 - **Embedding field**: `[]float32` with `omitempty` — set by the index worker after calling the embedder. The `EmbeddingText()` method returns the text to embed (concatenation of the entity's searchable text fields).
 - **EmbeddingField constant**: exported constant for the mapping field name, used by the index worker when constructing vector queries.
 - UUID foreign keys are serialized as strings in the document

@@ -75,7 +75,7 @@ Identify which project from the PR file paths.
 
 ### Denormalization — child entities with parent FK
 
-- [ ] Child entity mapping includes parent reference fields (e.g., `space_key`, `space_name`, `space_status`)
+- [ ] Child entity mapping includes parent reference fields (prefixed with `<parent>_`)
 - [ ] Denormalized fields prefixed with parent name
 - [ ] Denormalized fields use same types as in parent mapping (keyword, text, integer)
 - [ ] No separate parent index query needed — single-index search covers both
@@ -177,7 +177,7 @@ Scan all imports:
 ### Mapping Consistency
 | Document Field | JSON Tag | Mapping Property | Mapping Type | SQL Type | Denormalized | Status |
 |----------------|----------|------------------|--------------|----------|--------------|--------|
-| SpaceKey | space_key | space_key | keyword | TEXT (from space) | yes | PASS |
+| <Parent><Field> | <parent>_<field> | <parent>_<field> | keyword | TEXT (from parent) | yes | PASS |
 | Title | title | title | text | TEXT | no | PASS |
 | Embedding | embedding | embedding | knn_vector | — | no | PASS |
 | ... | ... | ... | ... | ... | ... | ... |
