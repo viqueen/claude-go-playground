@@ -104,6 +104,19 @@ func TestCreateContent_Success(t *testing.T) {
 		assert.Equal(t, []string{"go", "grpc"}, resp.Content.Tags)
 	})
 
+	t.Run("creates without tags — defaults to empty", func(t *testing.T) {
+		t.Parallel()
+		spaceID := tc.createSpace(t)
+		resp, err := tc.clients.standard.CreateContent(tc.ctx, &contentv1.CreateContentRequest{
+			Space:  &spacev1.SpaceRef{Id: spaceID},
+			Title:  "No Tags Content",
+			Body:   "body without tags",
+			Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, resp.Content.Tags)
+	})
+
 	t.Run("creates with published status", func(t *testing.T) {
 		t.Parallel()
 		spaceID := tc.createSpace(t)

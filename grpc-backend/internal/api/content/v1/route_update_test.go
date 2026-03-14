@@ -103,7 +103,7 @@ func TestUpdateContent_Success(t *testing.T) {
 			Id: created.Content.Id,
 			Content: &contentv1.Content{
 				Title:  "Updated Title",
-				Body:   "Some body text",
+				Body:   "This body should be ignored by the mask",
 				Space:  &spacev1.SpaceRef{Id: spaceID},
 				Status: contentv1.ContentStatus_CONTENT_STATUS_DRAFT,
 			},
@@ -111,6 +111,7 @@ func TestUpdateContent_Success(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "Updated Title", resp.Content.Title)
+		// Body should remain unchanged since it was not in the update mask.
 		assert.Equal(t, "Some body text", resp.Content.Body)
 	})
 
