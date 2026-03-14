@@ -43,6 +43,26 @@ import (
 	"github.com/gofrs/uuid/v5"
 )
 
+// Filter represents an exact-match constraint on a keyword or integer field.
+type Filter struct {
+	Field string
+	Value any
+}
+
+// Match represents a full-text search on a text field.
+type Match struct {
+	Field string
+	Query string
+}
+
+// Criteria defines a typed search query — filters for reference fields,
+// matches for searchable fields. The implementation translates this into
+// an OpenSearch bool query internally.
+type Criteria struct {
+	Filters []Filter
+	Matches []Match
+}
+
 // Hit represents a single search result with its raw JSON source.
 type Hit struct {
 	ID     uuid.UUID
@@ -55,14 +75,19 @@ type Search interface {
 	Index(ctx context.Context, index string, id uuid.UUID, document any) error
 	// Delete removes a document from the given index.
 	Delete(ctx context.Context, index string, id uuid.UUID) error
-	// Query searches an index with a raw OpenSearch query JSON and returns matching hits.
-	Query(ctx context.Context, index string, query []byte) ([]Hit, error)
+	// Find searches an index using typed criteria and returns matching hits.
+	Find(ctx context.Context, index string, criteria Criteria) ([]Hit, error)
 	// CreateIndexIfNotExists ensures an index exists with the given mapping.
 	CreateIndexIfNotExists(ctx context.Context, index string, mapping []byte) error
 }
 ```
 
 Backed by `github.com/opensearch-project/opensearch-go/v4/opensearchapi`.
+
+The implementation translates `Criteria` into an OpenSearch `bool` query:
+- Each `Filter` becomes a `term` clause in `filter` (exact match, no scoring)
+- Each `Match` becomes a `match` clause in `must` (full-text, scored)
+- An empty `Criteria` matches all documents
 
 Constructor:
 
@@ -75,6 +100,7 @@ func New(address string) (Search, error) {
 
 Conventions:
 - **Interface-first**: `Search` interface is public, implementation struct is private
+- **Typed queries**: callers use `Criteria` with `Filter` and `Match` — never raw JSON. The implementation owns the OpenSearch query DSL translation.
 - Constructor returns `(Search, error)` — the error covers connection/config issues
 - Use `opensearchapi` client (v4) — not the legacy v2 client
 - `CreateIndexIfNotExists` accepts `[]byte` (raw embedded JSON), not `string`

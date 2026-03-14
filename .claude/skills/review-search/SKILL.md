@@ -30,10 +30,14 @@ Identify which project from the PR file paths.
 
 ### Search Package — `pkg/search/`
 
-- [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `Query`, `CreateIndexIfNotExists` methods
+- [ ] `search.go` defines `Search` interface with `Index`, `Delete`, `Find`, `CreateIndexIfNotExists` methods
 - [ ] `Index` and `Delete` accept `uuid.UUID` for the `id` parameter (not `string`)
-- [ ] `Query` accepts `[]byte` (raw OpenSearch query JSON) and returns `[]Hit`
+- [ ] `Find` accepts typed `Criteria` (not raw JSON) and returns `[]Hit`
+- [ ] `Criteria` struct has `Filters []Filter` and `Matches []Match`
+- [ ] `Filter` struct has `Field string` and `Value any` (for keyword/integer exact-match)
+- [ ] `Match` struct has `Field string` and `Query string` (for text full-text search)
 - [ ] `Hit` struct has `ID uuid.UUID` and `Source json.RawMessage`
+- [ ] Implementation translates `Criteria` into OpenSearch `bool` query internally — no raw JSON leaks through the interface
 - [ ] `CreateIndexIfNotExists` accepts `[]byte` (embedded JSON), not `string`
 - [ ] Implementation struct is private (lowercase)
 - [ ] Constructor `New()` returns `(Search, error)` — interface, not struct
