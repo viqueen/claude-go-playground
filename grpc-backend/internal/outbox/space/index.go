@@ -24,9 +24,9 @@ func must(data []byte, err error) []byte {
 // EmbeddingField is the mapping field name for the vector embedding.
 const EmbeddingField = "embedding"
 
-// SpaceDocument represents the search document for a space.
+// Document represents the search document for a space.
 // Fields match the mapping properties in mappings/space.json exactly.
-type SpaceDocument struct {
+type Document struct {
 	Key         string    `json:"key"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
@@ -36,8 +36,8 @@ type SpaceDocument struct {
 }
 
 // toDocument maps a sqlc CollaborationSpace model to a search document.
-func toDocument(entity *db.CollaborationSpace) SpaceDocument {
-	return SpaceDocument{
+func toDocument(entity *db.CollaborationSpace) Document {
+	return Document{
 		Key:         entity.Key,
 		Name:        entity.Name,
 		Description: entity.Description,
@@ -47,6 +47,6 @@ func toDocument(entity *db.CollaborationSpace) SpaceDocument {
 }
 
 // EmbeddingText returns the text to embed for this document.
-func (d SpaceDocument) EmbeddingText() string {
+func (d Document) EmbeddingText() string {
 	return d.Name + "\n" + d.Description
 }
